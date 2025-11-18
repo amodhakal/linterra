@@ -2,17 +2,85 @@
 
 #include <glad/glad.h>
 
+#include <vector>
+
 #include "config.h"
+
+std::vector<float> getVboFromStore(const BlockStore &store,
+                                   const ChunkPosition &position) {
+  std::vector<float> vertices;
+
+  int chunkXToPosition = position.xPosition * Constants::Chunk::LENGTH;
+  int chunkZToPosition = position.zPosition * Constants::Chunk::LENGTH;
+
+  for (uint blockX = 0; blockX < Constants::Chunk::LENGTH; blockX++) {
+    for (uint blockY = 0; blockY < Constants::Chunk::HEIGHT; blockY++) {
+      for (uint blockZ = 0; blockZ < Constants::Chunk::LENGTH; blockZ++) {
+        BlockType current = store[blockX][blockY][blockZ];
+
+        // Air has no mesh
+        if (current == BlockType::AIR) {
+          continue;
+        }
+
+        // TODO Check all of the 6 adjacent blocks. If at the edge or air
+        // exists, only then add a triangle
+
+        std::vector<float> currentData;
+
+        // Top
+        if (blockY + 1 == Constants::Chunk::HEIGHT ||
+            store[blockX][blockY + 1][blockZ] != BlockType::AIR) {
+          currentData = {
+              // First triangle
+              //  // Bottom-left
+              //  baseX, 0.0f, baseZ, 0.0f, 0.0f, 1.0f, 0.0f, 0.6f, 0.1f,
+              //  // Bottom-right
+              //  baseX + Constants::Chunk::LENGTH, 0.0f, baseZ, 0.0f,
+              //  0.0f, 1.0f, 0.0f, 0.6f, 0.1f,
+              //  // Top-left
+              //  baseX, 0.0f, baseZ + Constants::Chunk::LENGTH, 0.0f,
+              //  0.0f, 1.0f, 0.0f, 0.6f, 0.1f,
+
+              //  // Second triangle
+              //  // Bottom-right
+              //  baseX + Constants::Chunk::LENGTH, 0.0f, baseZ, 0.0f,
+              //  0.0f, 1.0f, 0.0f, 0.6f, 0.1f,
+              //  // Top-right
+              //  baseX + Constants::Chunk::LENGTH, 0.0f,
+              //  baseZ + Constants::Chunk::LENGTH, 0.0f, 0.0f, 1.0f,
+              //  0.0f, 0.6f, 0.1f,
+              //  // Top-left
+              //  baseX, 0.0f, baseZ + Constants::Chunk::LENGTH, 0.0f,
+              //  0.0f, 1.0f, 0.0f, 0.6f, 0.1f
+          };
+          vertices.insert_range(vertices.end(), currentData);
+        }
+
+        // Down
+
+        // Front
+
+        // Back
+
+        // Left
+
+        // Right
+      }
+    }
+  }
+
+  return vertices;
+}
 
 Chunk::Chunk(const ChunkPosition &position) {
   float grassHeight = 2;
-  BlockType blocks[Constants::Chunk::LENGTH][Constants::Chunk::HEIGHT]
-                  [Constants::Chunk::LENGTH];
+  BlockStore store;
 
   for (uint blockX = 0; blockX < Constants::Chunk::LENGTH; blockX++) {
     for (uint blockY = 0; blockY < grassHeight; blockY++) {
       for (uint blockZ = 0; blockZ < Constants::Chunk::LENGTH; blockZ++) {
-        blocks[blockX][blockY][blockZ] = BlockType::GRASS;
+        store[blockX][blockY][blockZ] = BlockType::GRASS;
       }
     }
   }
@@ -21,7 +89,7 @@ Chunk::Chunk(const ChunkPosition &position) {
     for (uint blockY = grassHeight; blockY < Constants::Chunk::HEIGHT;
          blockY++) {
       for (uint blockZ = 0; blockZ < Constants::Chunk::LENGTH; blockZ++) {
-        blocks[blockX][blockY][blockZ] = BlockType::AIR;
+        store[blockX][blockY][blockZ] = BlockType::AIR;
       }
     }
   }
@@ -31,27 +99,8 @@ Chunk::Chunk(const ChunkPosition &position) {
 
   float baseX = position.xPosition * Constants::Chunk::LENGTH;
   float baseZ = position.zPosition * Constants::Chunk::LENGTH;
-  m_VboData = {
-      // First triangle
-      // Bottom-left
-      baseX, 0.0f, baseZ, 0.0f, 0.0f, 1.0f, 0.0f, 0.6f, 0.1f,
-      // Bottom-right
-      baseX + Constants::Chunk::LENGTH, 0.0f, baseZ, 0.0f, 0.0f, 1.0f, 0.0f,
-      0.6f, 0.1f,
-      // Top-left
-      baseX, 0.0f, baseZ + Constants::Chunk::LENGTH, 0.0f, 0.0f, 1.0f, 0.0f,
-      0.6f, 0.1f,
 
-      // Second triangle
-      // Bottom-right
-      baseX + Constants::Chunk::LENGTH, 0.0f, baseZ, 0.0f, 0.0f, 1.0f, 0.0f,
-      0.6f, 0.1f,
-      // Top-right
-      baseX + Constants::Chunk::LENGTH, 0.0f, baseZ + Constants::Chunk::LENGTH,
-      0.0f, 0.0f, 1.0f, 0.0f, 0.6f, 0.1f,
-      // Top-left
-      baseX, 0.0f, baseZ + Constants::Chunk::LENGTH, 0.0f, 0.0f, 1.0f, 0.0f,
-      0.6f, 0.1f};
+  m_VboData = getVboFromStore(store, position);
 
   glGenVertexArrays(1, &m_VAO);
   glGenBuffers(1, &m_VBO);

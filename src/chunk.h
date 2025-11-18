@@ -26,6 +26,9 @@ struct std::hash<ChunkPosition> {
 
 enum BlockType { AIR, GRASS };
 
+typedef BlockType BlockStore[Constants::Chunk::LENGTH][Constants::Chunk::HEIGHT]
+                            [Constants::Chunk::LENGTH];
+
 class Chunk {
  public:
   Chunk() = default;
