@@ -17,30 +17,27 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
            static_cast<size_t>(z);
   };
 
+  auto getGrassHeight = [&](int bx, int bz) -> uint {
+    float baseX = position.s * Constants::Chunk::LENGTH;
+    float baseZ = position.t * Constants::Chunk::LENGTH;
+    float noiseX = baseX + bx;
+    float noiseZ = baseZ + bz;
+
+    auto n = Noise::fbm(
+        glm::vec2(noiseX, noiseZ) * Constants::Noise::FREQUENCY,
+        Constants::Noise::FRACTAL_OCTAVE,
+        Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
+    float noiseY = n.value;
+    noiseY /= 2.0f;
+    noiseY += 0.5f;
+
+    return static_cast<uint>(
+        std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
+  };
+
   for (uint blockX = 0; blockX < Constants::Chunk::LENGTH; blockX++) {
     for (uint blockZ = 0; blockZ < Constants::Chunk::LENGTH; blockZ++) {
-      if (position.s < 0 || position.t < 0) {
-        bool isHere = false;
-      }
-
-      float baseX = position.s * Constants::Chunk::LENGTH;
-      float baseZ = position.t * Constants::Chunk::LENGTH;
-      float noiseX = baseX + blockX;
-      float noiseZ = baseZ + blockZ;
-
-      auto n = Noise::fbm(
-          glm::vec2(noiseX, noiseZ) * Constants::Noise::FREQUENCY,
-          Constants::Noise::FRACTAL_OCTAVE,
-          Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
-      float noiseY = n.value;
-      noiseY /= 2.0f;
-      noiseY += 0.5f;
-
-      assert(!isnan(noiseY));
-      assert(noiseY >= 0.0);
-
-      uint grassHeight = static_cast<uint>(
-          std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
+      uint grassHeight = getGrassHeight(blockX, blockZ);
       m_HeightMap[blockX][blockZ] = grassHeight;
 
       for (int blockY = 0; blockY < grassHeight; blockY++) {
@@ -153,7 +150,13 @@ for (int x = 0; x < static_cast<int>(BX); ++x) {
                 int nz = z + dirs[d][2];
                 bool neighborAir = false;
                 if (nx < 0 || ny < 0 || nz < 0 || nx >= static_cast<int>(BX) || ny >= static_cast<int>(BY) || nz >= static_cast<int>(BZ)) {
-                    neighborAir = true; // out of bounds counts as air
+                    if (ny < 0 || ny >= static_cast<int>(BY)) {
+                        neighborAir = true;
+                    } else {
+                        // Check neighbor chunk height
+                        uint nHeight = getGrassHeight(nx, nz);
+                        neighborAir = (static_cast<uint>(ny) > nHeight);
+                    }
                 } else {
                     neighborAir = (blocks[blockIndex(nx, ny, nz)] == BlockType::AIR);
                 }
