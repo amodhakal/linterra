@@ -6,6 +6,7 @@ out vec3 fragColor;
 flat out int fragNormal;
 out vec3 fragPosition;
 out vec3 fragTexData;
+out float fragDepth;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -30,4 +31,5 @@ void main() {
     fragPosition = position;
     fragTexData = texData;
     fragNormal = normal;
+    fragDepth = gl_Position.w;
 }

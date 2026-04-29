@@ -76,3 +76,11 @@ void Shader::setUniformInt(const char* name, int value) {
 void Shader::setUniformIntArray(const char* name, const int* values, int count) {
   glUniform1iv(m_Uniforms[name], count, values);
 }
+
+void Shader::setUniformFloat(const char* name, float value) {
+  glUniform1f(m_Uniforms[name], value);
+}
+
+void Shader::setUniformVec3(const char* name, glm::vec3 value) {
+  glUniform3f(m_Uniforms[name], value.x, value.y, value.z);
+}

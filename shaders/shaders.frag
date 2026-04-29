@@ -6,10 +6,14 @@ const int BOTTOM_NORMAL = 2;
 const int TOP_NORMAL = 3;
 
 uniform sampler2DArray uTextureArray;
+uniform float uFogStart;
+uniform float uFogEnd;
+uniform vec3 uFogColor;
 
 flat in int fragNormal;
 in vec3 fragPosition;
 in vec3 fragTexData; // x = texId, y = u, z = v
+in float fragDepth;
 
 out vec4 outColor;
 
@@ -31,4 +35,7 @@ void main() {
     }
 
     outColor = texColor * light;
+
+    float fogFactor = clamp((fragDepth - uFogStart) / (uFogEnd - uFogStart), 0.0, 1.0);
+    outColor = mix(outColor, vec4(uFogColor, 1.0), fogFactor);
 }

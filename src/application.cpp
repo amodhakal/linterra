@@ -63,9 +63,15 @@ Application::Application(const char* title, const uint width, const uint height,
   m_Shader.newUniform("uView");
   m_Shader.newUniform("uProjection");
   m_Shader.newUniform("uTextureArray");
+  m_Shader.newUniform("uFogStart");
+  m_Shader.newUniform("uFogEnd");
+  m_Shader.newUniform("uFogColor");
 
   m_Shader.use();
   m_Shader.setUniformInt("uTextureArray", 0);
+  m_Shader.setUniformFloat("uFogStart", Constants::Chunk::FOG_START);
+  m_Shader.setUniformFloat("uFogEnd", Constants::Chunk::FOG_END);
+  m_Shader.setUniformVec3("uFogColor", Constants::FOG_COLOR);
 }
 
 Application::~Application() {

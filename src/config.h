@@ -14,6 +14,7 @@ constexpr uint SCR_WIDTH = 800;
 constexpr uint SCR_HEIGHT = 600;
 
 constexpr auto BG_COLOR = glm::vec4(0.3, 0.5, 0.6, 1.0);
+constexpr auto FOG_COLOR = glm::vec3(0.3, 0.5, 0.6);
 
 constexpr bool DO_TRIANGLE_LINE = false;
 constexpr bool DO_GRAVITY = false;
@@ -46,6 +47,8 @@ constexpr int LENGTH = 16;
 constexpr int HEIGHT = 256;
 constexpr int RENDER_DISTANCE_CHUNKS = 64;
 constexpr int RENDER_DISTANCE_BLOCKS = RENDER_DISTANCE_CHUNKS * LENGTH;
+  constexpr float FOG_START = RENDER_DISTANCE_BLOCKS / 2.0f;
+  constexpr float FOG_END = RENDER_DISTANCE_BLOCKS;
 constexpr int MAX_BLOCK_HEIGHT = HEIGHT / 1.5;
 constexpr int MAX_GENERATION_THREADS = 100;
 }  // namespace Chunk
