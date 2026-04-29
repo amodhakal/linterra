@@ -2,13 +2,19 @@
 #include <noise/noise.h>
 #include <sys/types.h>
 
-#include <future>
+#include <atomic>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "camera.h"
 #include "chunk.h"
 #include "shader.h"
+#include "threadpool.h"
+
+struct TaskResult {
+  Chunk chunk;
+  std::atomic<bool> ready{false};
+};
 
 namespace std {
 template <> struct hash<glm::vec2> {
@@ -33,5 +39,6 @@ private:
   std::unordered_map<glm::vec2, Chunk> m_ProcessedChunks;
   std::unordered_set<glm::vec2> m_ProcessingPositions;
 
-  std::unordered_map<glm::vec2, std::future<Chunk>> m_ProcessingChunks;
+  std::unordered_map<glm::vec2, TaskResult> m_ProcessingChunks;
+  ThreadPool m_ThreadPool;
 };

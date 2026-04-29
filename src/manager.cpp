@@ -4,11 +4,9 @@
 
 #include <algorithm>
 #include <cassert>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
-#include <future>
 #include <glm/glm.hpp>
 
 #include "chunk.h"
@@ -44,22 +42,17 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
 
   for (auto it = m_ProcessingChunks.begin(); it != m_ProcessingChunks.end();) {
     const glm::vec2 position = it->first;
-    std::future<Chunk> &worker = it->second;
+    TaskResult &result = it->second;
 
-    if (worker.wait_for(std::chrono::milliseconds(0)) !=
-        std::future_status::ready) {
-      // If current chunk worker not yet processed, continue
-      it++;
+    if (!result.ready.load()) {
+      ++it;
       continue;
     }
 
-    // Get the mesh data and process it (gl requires main thread)
-    Chunk chunk = worker.get();
-    chunk.pass();
+    result.chunk.pass();
 
-    // Remove from processing, add to processed
     m_ProcessingPositions.erase(position);
-    m_ProcessedChunks[position] = std::move(chunk);
+    m_ProcessedChunks[position] = std::move(result.chunk);
     it = m_ProcessingChunks.erase(it);
   }
 
@@ -99,25 +92,15 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       }
 
       if (m_ProcessingPositions.contains(position)) {
-        // Chunk in the process of being processed;
-        continue;
-      }
-
-      // Respect a limit on concurrent generation threads to avoid high memory
-      // use when many chunks are requested at once.
-      if (static_cast<int>(m_ProcessingChunks.size()) >=
-          Constants::Chunk::MAX_GENERATION_THREADS) {
-        // Skip spawning this frame; it will be retried next render.
         continue;
       }
 
       m_ProcessingPositions.insert(position);
-      m_ProcessingChunks[position] =
-          std::async(std::launch::async, [position]() mutable {
-            Chunk chunk;
-            chunk.generateMeshData(position);
-            return chunk;
-          });
+      TaskResult &result = m_ProcessingChunks[position];
+      m_ThreadPool.enqueue([&result, position]() {
+        result.chunk.generateMeshData(position);
+        result.ready.store(true);
+      });
     }
   }
 
