@@ -4,3 +4,30 @@ Milestone 4:
     18FPS 1.3 GB at 64 Chunks
 ✔ Add 2d Heightmaps instead of 3d @done(26-04-29 14:05)
     9 FPS 3.2 GB at 64 Chunks
+✔ Add persistent work thread pool @done(26-04-29 14:22)
+    9 FPS 3.2 GB at 64 Chunks
+    
+☐ Bake Chunk Positions
+    Modify the mesh generator to use world-space
+    coordinates. This allows us to remove the uModel 
+    uniform update for every chunk, significantly 
+    reducing CPU-to-GPU overhead.
+☐ Fast-Path Culling
+    Implement a 2D "broad-phase" distance check before
+    the expensive 3D frustum check.
+☐ Texture Array
+    Switch from an array of samplers to 
+    GL_TEXTURE_2D_ARRAY to allow more efficient 
+    texture indexing in the shader.
+☐ Vertex Compression
+    Compress the vertex format from 28 bytes to 8 
+    bytes (using uint16 and uint8). This will reduce 
+    memory usage by ~3.5x and improve cache locality.
+☐ Greedy Meshing
+    Combine adjacent faces of the same type into 
+    larger quads. This can reduce the triangle count
+    and vertex count by 50%–80% in typical terrain.
+☐ Heightmap Cache
+    Share heightmaps between adjacent chunks during
+    generation to eliminate redundant noise 
+    calculations.
