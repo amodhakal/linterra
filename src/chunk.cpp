@@ -10,14 +10,8 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
   const size_t BX = Constants::Chunk::LENGTH;
   const size_t BY = Constants::Chunk::HEIGHT;
   const size_t BZ = Constants::Chunk::LENGTH;
-  std::vector<BlockType> blocks(BX * BY * BZ, BlockType::AIR);
 
-  auto blockIndex = [&](int x, int y, int z) -> size_t {
-    return (static_cast<size_t>(x) * BY + static_cast<size_t>(y)) * BZ +
-           static_cast<size_t>(z);
-  };
-
-  auto getGrassHeight = [&](int bx, int bz) -> uint {
+  auto getGrassHeight = [&](int bx, int bz) -> ushort {
     float baseX = position.s * Constants::Chunk::LENGTH;
     float baseZ = position.t * Constants::Chunk::LENGTH;
     float noiseX = baseX + bx;
@@ -25,46 +19,39 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
 
     auto n = Noise::fbm(
         glm::vec2(noiseX, noiseZ) * Constants::Noise::FREQUENCY,
-        Constants::Noise::FRACTAL_OCTAVE,
-        Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
+        Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
     float noiseY = n.value;
     noiseY /= 2.0f;
     noiseY += 0.5f;
 
-    return static_cast<uint>(
+    return static_cast<ushort>(
+        std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
+  };
+
+  auto getNeighborHeight = [&](int nx, int nz) -> ushort {
+    int worldX = static_cast<int>(position.s) * Constants::Chunk::LENGTH + nx;
+    int worldZ = static_cast<int>(position.t) * Constants::Chunk::LENGTH + nz;
+
+    auto n = Noise::fbm(
+        glm::vec2(static_cast<float>(worldX), static_cast<float>(worldZ)) * Constants::Noise::FREQUENCY,
+        Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
+    float noiseY = n.value;
+    noiseY /= 2.0f;
+    noiseY += 0.5f;
+
+    return static_cast<ushort>(
         std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
   };
 
   for (uint blockX = 0; blockX < Constants::Chunk::LENGTH; blockX++) {
     for (uint blockZ = 0; blockZ < Constants::Chunk::LENGTH; blockZ++) {
-      uint grassHeight = getGrassHeight(blockX, blockZ);
+      ushort grassHeight = getGrassHeight(blockX, blockZ);
       m_HeightMap[blockX][blockZ] = grassHeight;
-
-      for (int blockY = 0; blockY < grassHeight; blockY++) {
-        blocks[blockIndex(blockX, blockY, blockZ)] = BlockType::DIRT;
-      }
-
-      blocks[blockIndex(blockX, grassHeight, blockZ)] = BlockType::GRASS;
-
-      for (int blockY = grassHeight + 1; blockY < Constants::Chunk::HEIGHT;
-           blockY++) {
-        blocks[blockIndex(blockX, blockY, blockZ)] = BlockType::AIR;
-      }
     }
   }
 
-  int chunkXToPosition = 0;
-  int chunkZToPosition = 0;
   m_Data.clear();
   m_Indices.clear();
-
-  const int dims[3] = {static_cast<int>(BX), static_cast<int>(BY),
-                       static_cast<int>(BZ)};
-
-  auto idx3 = [&](int x, int y, int z) -> size_t {
-    return (static_cast<size_t>(x) * BY + static_cast<size_t>(y)) * BZ +
-           static_cast<size_t>(z);
-  };
 
   // Map (block type, face normal) -> texture unit id
   auto blockTextureId = [&](BlockType t, BlockNormal n) -> int {
@@ -134,88 +121,96 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
     m_Indices.push_back(static_cast<uint>(base + 3));
   };
 
-// Naive per‑block face generation (no greedy meshing)
-// Iterate over every block and emit a quad for each exposed face.
-for (int x = 0; x < static_cast<int>(BX); ++x) {
-    for (int y = 0; y < static_cast<int>(BY); ++y) {
-        for (int z = 0; z < static_cast<int>(BZ); ++z) {
-            BlockType cur = blocks[blockIndex(x, y, z)];
-            if (cur == BlockType::AIR) continue;
-
-            // Directions: +X, -X, +Y, -Y, +Z, -Z
-            const int dirs[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-            for (int d = 0; d < 6; ++d) {
-                int nx = x + dirs[d][0];
-                int ny = y + dirs[d][1];
-                int nz = z + dirs[d][2];
-                bool neighborAir = false;
-                if (nx < 0 || ny < 0 || nz < 0 || nx >= static_cast<int>(BX) || ny >= static_cast<int>(BY) || nz >= static_cast<int>(BZ)) {
-                    if (ny < 0 || ny >= static_cast<int>(BY)) {
-                        neighborAir = true;
-                    } else {
-                        // Check neighbor chunk height
-                        uint nHeight = getGrassHeight(nx, nz);
-                        neighborAir = (static_cast<uint>(ny) > nHeight);
-                    }
-                } else {
-                    neighborAir = (blocks[blockIndex(nx, ny, nz)] == BlockType::AIR);
-                }
-                if (!neighborAir) continue;
-
-                // Determine quad parameters based on direction
-                glm::ivec3 a(x, y, z);
-                glm::ivec3 du(0,0,0), dv(0,0,0);
-                BlockNormal normalId;
-                bool flipV = false;
-                switch (d) {
-                    case 0: // +X (right face)
-                        a.x = x + 1;
-                        du = {0,1,0};
-                        dv = {0,0,1};
-                        normalId = BlockNormal::RIGHT_LEFT_NORMAL;
-                        break;
-                    case 1: // -X (left face)
-                        du = {0,1,0};
-                        dv = {0,0,1};
-                        normalId = BlockNormal::RIGHT_LEFT_NORMAL;
-                        break;
-                    case 2: // +Y (top)
-                        a.y = y + 1;
-                        du = {1,0,0};
-                        dv = {0,0,1};
-                        normalId = BlockNormal::TOP_NORMAL;
-                        break;
-                    case 3: // -Y (bottom)
-                        du = {1,0,0};
-                        dv = {0,0,1};
-                        normalId = BlockNormal::BOTTOM_NORMAL;
-                        break;
-                    case 4: // +Z (front)
-                        a.z = z + 1;
-                        du = {1,0,0};
-                        dv = {0,1,0};
-                        normalId = BlockNormal::FRONT_BACK_NORMAL;
-                        break;
-                    case 5: // -Z (back)
-                        du = {1,0,0};
-                        dv = {0,1,0};
-                        normalId = BlockNormal::FRONT_BACK_NORMAL;
-                        flipV = true; // match original orientation for back faces
-                        break;
-                }
-                int texId = blockTextureId(cur, normalId);
-
-                // Do not genreate the bottom blocks
-                if ( d == 3 && y == 0) {
-                  continue;
-                }
-
-                addQuad(a, du, dv, normalId, texId, flipV);
-            }
-        }
+auto isBlockExposed = [&](int x, int y, int z, int dir) -> bool {
+    int nx = x, ny = y, nz = z;
+    switch (dir) {
+      case 0: nx = x + 1; break;
+      case 1: nx = x - 1; break;
+      case 2: ny = y + 1; break;
+      case 3: ny = y - 1; break;
+      case 4: nz = z + 1; break;
+      case 5: nz = z - 1; break;
     }
-}
 
+    if (ny < 0 || ny >= static_cast<int>(BY)) {
+      return true;
+    }
+
+    ushort neighborHeight;
+    if (nx < 0 || nz < 0 || nx >= static_cast<int>(BX) ||
+        nz >= static_cast<int>(BZ)) {
+      neighborHeight = getNeighborHeight(nx, nz);
+    } else {
+      neighborHeight = m_HeightMap[nx][nz];
+    }
+
+    return static_cast<ushort>(ny) >= neighborHeight;
+  };
+
+  for (int x = 0; x < static_cast<int>(BX); ++x) {
+    for (int z = 0; z < static_cast<int>(BZ); ++z) {
+      ushort height = m_HeightMap[x][z];
+      for (int y = height; y >= 0; --y) {
+        bool hasExposedFace = false;
+
+        for (int d = 0; d < 6; ++d) {
+          if (!isBlockExposed(x, y, z, d)) continue;
+
+          hasExposedFace = true;
+
+          BlockType cur = (y == static_cast<int>(height)) ? BlockType::GRASS : BlockType::DIRT;
+
+          glm::ivec3 a(x, y, z);
+          glm::ivec3 du(0, 0, 0), dv(0, 0, 0);
+          BlockNormal normalId;
+          bool flipV = false;
+
+          switch (d) {
+            case 0:
+              a.x = x + 1;
+              du = {0, 1, 0};
+              dv = {0, 0, 1};
+              normalId = BlockNormal::RIGHT_LEFT_NORMAL;
+              break;
+            case 1:
+              du = {0, 1, 0};
+              dv = {0, 0, 1};
+              normalId = BlockNormal::RIGHT_LEFT_NORMAL;
+              break;
+            case 2:
+              a.y = y + 1;
+              du = {1, 0, 0};
+              dv = {0, 0, 1};
+              normalId = BlockNormal::TOP_NORMAL;
+              break;
+            case 3:
+              if (y == 0) continue;
+              du = {1, 0, 0};
+              dv = {0, 0, 1};
+              normalId = BlockNormal::BOTTOM_NORMAL;
+              break;
+            case 4:
+              a.z = z + 1;
+              du = {1, 0, 0};
+              dv = {0, 1, 0};
+              normalId = BlockNormal::FRONT_BACK_NORMAL;
+              break;
+            case 5:
+              du = {1, 0, 0};
+              dv = {0, 1, 0};
+              normalId = BlockNormal::FRONT_BACK_NORMAL;
+              flipV = true;
+              break;
+          }
+
+          int texId = blockTextureId(cur, normalId);
+          addQuad(a, du, dv, normalId, texId, flipV);
+        }
+
+        if (!hasExposedFace) break;
+      }
+    }
+  }
 }
 
 void Chunk::pass() {
@@ -268,6 +263,6 @@ void Chunk::render() {
                  GL_UNSIGNED_INT, 0);
 }
 
-uint Chunk::getHighestBlockY(uint blockX, uint blockZ) {
+ushort Chunk::getHighestBlockY(uint blockX, uint blockZ) {
   return m_HeightMap[blockX][blockZ];
 }

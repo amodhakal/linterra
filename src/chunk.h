@@ -24,7 +24,7 @@ public:
   void pass();
   void render();
   void cleanup();
-  uint getHighestBlockY(uint blockX, uint blockZ);
+  ushort getHighestBlockY(uint blockX, uint blockZ);
 
 private:
   uint m_VAO;
@@ -36,5 +36,5 @@ private:
   std::vector<float> m_Data;
   std::vector<uint> m_Indices;
 
-  uint m_HeightMap[Constants::Chunk::LENGTH][Constants::Chunk::LENGTH];
+  ushort m_HeightMap[Constants::Chunk::LENGTH][Constants::Chunk::LENGTH];
 };
