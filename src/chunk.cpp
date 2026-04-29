@@ -137,121 +137,82 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
     m_Indices.push_back(static_cast<uint>(base + 3));
   };
 
-  for (int d = 0; d < 3; ++d) {
-    int u = (d + 1) % 3;
-    int v = (d + 2) % 3;
+// Naive per‑block face generation (no greedy meshing)
+// Iterate over every block and emit a quad for each exposed face.
+for (int x = 0; x < static_cast<int>(BX); ++x) {
+    for (int y = 0; y < static_cast<int>(BY); ++y) {
+        for (int z = 0; z < static_cast<int>(BZ); ++z) {
+            BlockType cur = blocks[blockIndex(x, y, z)];
+            if (cur == BlockType::AIR) continue;
 
-    for (int dir = -1; dir <= 1; dir += 2) {
-      int dimU = dims[u];
-      int dimV = dims[v];
-      int dimD = dims[d];
-
-      std::vector<int> mask(dimU * dimV, 0);
-
-      for (int slice = 0; slice < dimD; ++slice) {
-        for (int iv = 0; iv < dimV; ++iv) {
-          for (int iu = 0; iu < dimU; ++iu) {
-            int coord[3];
-            coord[d] = slice;
-            coord[u] = iu;
-            coord[v] = iv;
-
-            int nx = coord[0];
-            int ny = coord[1];
-            int nz = coord[2];
-
-            int nn[3] = {nx, ny, nz};
-            nn[d] = coord[d] + dir;
-
-            BlockType a = BlockType::AIR;
-            BlockType b = BlockType::AIR;
-
-            if (coord[0] >= 0 && coord[0] < dims[0] && coord[1] >= 0 &&
-                coord[1] < dims[1] && coord[2] >= 0 && coord[2] < dims[2]) {
-              a = blocks[idx3(coord[0], coord[1], coord[2])];
-            }
-
-            if (nn[0] >= 0 && nn[0] < dims[0] && nn[1] >= 0 &&
-                nn[1] < dims[1] && nn[2] >= 0 && nn[2] < dims[2]) {
-              b = blocks[idx3(nn[0], nn[1], nn[2])];
-            }
-
-            int maskIndex = iv * dimU + iu;
-            if (a != BlockType::AIR && b == BlockType::AIR) {
-              mask[maskIndex] = static_cast<int>(a) + 1;
-            } else {
-              mask[maskIndex] = 0;
-            }
-          }
-        }
-
-        for (int j = 0; j < dimV; ++j) {
-          for (int i = 0; i < dimU; ++i) {
-            int mIndex = j * dimU + i;
-            int id = mask[mIndex];
-            if (id == 0)
-              continue;
-
-            int width = 1;
-            while (i + width < dimU && mask[j * dimU + (i + width)] == id)
-              ++width;
-
-            int height = 1;
-            bool done = false;
-            while (!done && j + height < dimV) {
-              for (int k2 = 0; k2 < width; ++k2) {
-                if (mask[(j + height) * dimU + (i + k2)] != id) {
-                  done = true;
-                  break;
+            // Directions: +X, -X, +Y, -Y, +Z, -Z
+            const int dirs[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+            for (int d = 0; d < 6; ++d) {
+                int nx = x + dirs[d][0];
+                int ny = y + dirs[d][1];
+                int nz = z + dirs[d][2];
+                bool neighborAir = false;
+                if (nx < 0 || ny < 0 || nz < 0 || nx >= static_cast<int>(BX) || ny >= static_cast<int>(BY) || nz >= static_cast<int>(BZ)) {
+                    neighborAir = true; // out of bounds counts as air
+                } else {
+                    neighborAir = (blocks[blockIndex(nx, ny, nz)] == BlockType::AIR);
                 }
-              }
-              if (!done)
-                ++height;
+                if (!neighborAir) continue;
+
+                // Determine quad parameters based on direction
+                glm::ivec3 a(x, y, z);
+                glm::ivec3 du(0,0,0), dv(0,0,0);
+                BlockNormal normalId;
+                bool flipV = false;
+                switch (d) {
+                    case 0: // +X (right face)
+                        a.x = x + 1;
+                        du = {0,1,0};
+                        dv = {0,0,1};
+                        normalId = BlockNormal::RIGHT_LEFT_NORMAL;
+                        break;
+                    case 1: // -X (left face)
+                        du = {0,1,0};
+                        dv = {0,0,1};
+                        normalId = BlockNormal::RIGHT_LEFT_NORMAL;
+                        break;
+                    case 2: // +Y (top)
+                        a.y = y + 1;
+                        du = {1,0,0};
+                        dv = {0,0,1};
+                        normalId = BlockNormal::TOP_NORMAL;
+                        break;
+                    case 3: // -Y (bottom)
+                        du = {1,0,0};
+                        dv = {0,0,1};
+                        normalId = BlockNormal::BOTTOM_NORMAL;
+                        break;
+                    case 4: // +Z (front)
+                        a.z = z + 1;
+                        du = {1,0,0};
+                        dv = {0,1,0};
+                        normalId = BlockNormal::FRONT_BACK_NORMAL;
+                        break;
+                    case 5: // -Z (back)
+                        du = {1,0,0};
+                        dv = {0,1,0};
+                        normalId = BlockNormal::FRONT_BACK_NORMAL;
+                        flipV = true; // match original orientation for back faces
+                        break;
+                }
+                int texId = blockTextureId(cur, normalId);
+
+                // Do not genreate the bottom blocks
+                if ( d == 3 && y == 0) {
+                  continue;
+                }
+
+                addQuad(a, du, dv, normalId, texId, flipV);
             }
-
-            int aCoord[3] = {0, 0, 0};
-            aCoord[d] = slice + (dir == 1 ? 1 : 0);
-            aCoord[u] = i;
-            aCoord[v] = j;
-
-            glm::ivec3 a3 = glm::ivec3(aCoord[0], aCoord[1], aCoord[2]);
-
-            int duArr[3] = {0, 0, 0};
-            int dvArr[3] = {0, 0, 0};
-            duArr[u] = width;
-            dvArr[v] = height;
-
-            glm::ivec3 du3 = glm::ivec3(duArr[0], duArr[1], duArr[2]);
-            glm::ivec3 dv3 = glm::ivec3(dvArr[0], dvArr[1], dvArr[2]);
-
-            BlockNormal normalId;
-            if (d == 0) {
-              normalId = BlockNormal::RIGHT_LEFT_NORMAL;
-            } else if (d == 1) {
-              normalId = (dir == 1) ? BlockNormal::TOP_NORMAL
-                                    : BlockNormal::BOTTOM_NORMAL;
-            } else {
-              normalId = BlockNormal::FRONT_BACK_NORMAL;
-            }
-
-            BlockType mat = static_cast<BlockType>(id - 1);
-            int texId = blockTextureId(mat, normalId);
-
-            bool flipV = (d == 2 && dir == -1);
-            addQuad(a3, du3, dv3, normalId, texId, flipV);
-
-            for (int hj = 0; hj < height; ++hj) {
-              for (int wi = 0; wi < width; ++wi) {
-                mask[(j + hj) * dimU + (i + wi)] = 0;
-              }
-            }
-
-            i += width - 1;
-          }
         }
-      }
     }
-  }
+}
+
 }
 
 void Chunk::pass() {
