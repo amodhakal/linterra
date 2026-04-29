@@ -72,45 +72,46 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
   auto addQuad = [&](const glm::ivec3 &a, const glm::ivec3 &du,
                      const glm::ivec3 &dv, BlockNormal normalId, int texId,
                      bool flipV) {
-    glm::vec3 p0 = glm::vec3(static_cast<float>(a.x), static_cast<float>(a.y),
-                             static_cast<float>(a.z));
-    glm::vec3 p1 = glm::vec3(static_cast<float>(a.x + du.x),
-                             static_cast<float>(a.y + du.y),
-                             static_cast<float>(a.z + du.z));
-    glm::vec3 p2 = glm::vec3(static_cast<float>(a.x + dv.x),
-                             static_cast<float>(a.y + dv.y),
-                             static_cast<float>(a.z + dv.z));
-    glm::vec3 p3 = glm::vec3(static_cast<float>(a.x + du.x + dv.x),
-                             static_cast<float>(a.y + du.y + dv.y),
-                             static_cast<float>(a.z + du.z + dv.z));
+    int x = a.x;
+    int y = a.y;
+    int z = a.z;
 
-    size_t base = m_Data.size() / 7;
+    int duX = du.x, duY = du.y, duZ = du.z;
+    int dvX = dv.x, dvY = dv.y, dvZ = dv.z;
 
-    auto pushVertex = [&](const glm::vec3 &p, const glm::vec2 &uv) {
-      m_Data.push_back(p.x);
-      m_Data.push_back(p.y);
-      m_Data.push_back(p.z);
-      m_Data.push_back(static_cast<float>(normalId));
-      m_Data.push_back(static_cast<float>(texId));
-      m_Data.push_back(uv.x);
-      m_Data.push_back(uv.y);
+    size_t base = m_Data.size();
+
+    auto pushVertex = [&](int bx, int by, int bz, float uvX, float uvY) {
+      uint32_t corner = 0;
+      if (uvX > 0.0f) corner |= 1;
+      if (uvY > 0.0f) corner |= 2;
+
+      PackedVertex v;
+      v.bits = 0;
+      v.x = bx;
+      v.z = bz;
+      v.y = by;
+      v.normal = static_cast<uint32_t>(normalId);
+      v.texId = static_cast<uint32_t>(texId);
+      v.corner = corner;
+      m_Data.push_back(v);
     };
 
     float width =
-        static_cast<float>(std::abs(du.x) + std::abs(du.y) + std::abs(du.z));
+        static_cast<float>(std::abs(duX) + std::abs(duY) + std::abs(duZ));
     float height =
-        static_cast<float>(std::abs(dv.x) + std::abs(dv.y) + std::abs(dv.z));
+        static_cast<float>(std::abs(dvX) + std::abs(dvY) + std::abs(dvZ));
 
     if (!flipV) {
-      pushVertex(p0, glm::vec2(0.0f, 0.0f));
-      pushVertex(p1, glm::vec2(width, 0.0f));
-      pushVertex(p2, glm::vec2(0.0f, height));
-      pushVertex(p3, glm::vec2(width, height));
+      pushVertex(x, y, z, 0.0f, 0.0f);
+      pushVertex(x + duX, y + duY, z + duZ, width, 0.0f);
+      pushVertex(x + dvX, y + dvY, z + dvZ, 0.0f, height);
+      pushVertex(x + duX + dvX, y + duY + dvY, z + duZ + dvZ, width, height);
     } else {
-      pushVertex(p0, glm::vec2(0.0f, height));
-      pushVertex(p1, glm::vec2(width, height));
-      pushVertex(p2, glm::vec2(0.0f, 0.0f));
-      pushVertex(p3, glm::vec2(width, 0.0f));
+      pushVertex(x, y, z, 0.0f, height);
+      pushVertex(x + duX, y + duY, z + duZ, width, height);
+      pushVertex(x + dvX, y + dvY, z + dvZ, 0.0f, 0.0f);
+      pushVertex(x + duX + dvX, y + duY + dvY, z + duZ + dvZ, width, 0.0f);
     }
 
     m_Indices.push_back(static_cast<uint>(base + 0));
@@ -221,7 +222,7 @@ void Chunk::pass() {
   glBindVertexArray(m_VAO);
 
   glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-  glBufferData(GL_ARRAY_BUFFER, m_Data.size() * sizeof(float), m_Data.data(),
+  glBufferData(GL_ARRAY_BUFFER, m_Data.size() * sizeof(PackedVertex), m_Data.data(),
                GL_STATIC_DRAW);
 
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
@@ -236,15 +237,8 @@ void Chunk::pass() {
   m_Data.shrink_to_fit();
   m_Indices.shrink_to_fit();
 
-  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float), (void *)0);
+  glVertexAttribPointer(0, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(PackedVertex), (void *)0);
   glEnableVertexAttribArray(0);
-  glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 7 * sizeof(float),
-                        (void *)(3 * sizeof(float)));
-  glEnableVertexAttribArray(1);
-
-  glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 7 * sizeof(float),
-                        (void *)(4 * sizeof(float)));
-  glEnableVertexAttribArray(2);
 
   if (Constants::DO_TRIANGLE_LINE) {
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);

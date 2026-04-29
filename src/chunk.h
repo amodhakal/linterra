@@ -15,6 +15,19 @@ enum BlockNormal : uint8_t {
   TOP_NORMAL = 3
 };
 
+union PackedVertex {
+  uint32_t bits;
+  struct {
+    uint32_t x      : 8;
+    uint32_t z      : 8;
+    uint32_t y      : 8;
+    uint32_t normal : 2;
+    uint32_t texId   : 2;
+    uint32_t corner  : 2;
+    uint32_t _pad   : 2;
+  };
+};
+
 class Chunk {
 public:
   Chunk() = default;
@@ -33,7 +46,7 @@ private:
   uint m_VboSize;
   uint m_IndexCount;
 
-  std::vector<float> m_Data;
+  std::vector<PackedVertex> m_Data;
   std::vector<uint> m_Indices;
 
   ushort m_HeightMap[Constants::Chunk::LENGTH][Constants::Chunk::LENGTH];
