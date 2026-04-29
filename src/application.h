@@ -23,7 +23,7 @@ class Application {
   Shader m_Shader;
   ChunkManager m_ChunkManager;
   Player m_Player;
-  Texture m_Textures[3];
+  Texture m_TextureArray;
 
   uint m_FpsAttempts;
   float m_CombinedDeltaTime;

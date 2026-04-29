@@ -12,15 +12,9 @@ Milestone 4:
 ✔ Compress the vertex format from 28 bytes to 4 bytes @done(26-04-29 14:46)
     12 FPS 1.5 GB at 64 Chunks
 
-☐ Fast-Path Culling
-    Implement a 2D "broad-phase" distance check before
-    the expensive 3D frustum check.
-
-☐ Texture Array
-    Switch from an array of samplers to 
-    GL_TEXTURE_2D_ARRAY to allow more efficient 
-    texture indexing in the shader.
-
+✔ Switch from an array of samplers to GL_TEXTURE_2D_ARRAY @done(26-04-29 15:52)
+    17 FPS 1.5 GB at 64 Chunks
+    
 ☐ Heightmap Cache
     Share heightmaps between adjacent chunks during
     generation to eliminate redundant noise 

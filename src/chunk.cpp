@@ -57,15 +57,11 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
   auto blockTextureId = [&](BlockType t, BlockNormal n) -> int {
     switch (t) {
     case BlockType::GRASS:
-      if (n == BlockNormal::TOP_NORMAL)
-        return 0; // grass_top
-      if (n == BlockNormal::BOTTOM_NORMAL)
-        return 2; // dirt underside
-      return 1;   // grass_side
+      return 0; // grass_top (layer 0) for all faces
     case BlockType::DIRT:
-      return 2; // dirt
+      return 1; // dirt (layer 1)
     default:
-      return 2;
+      return 1;
     }
   };
 

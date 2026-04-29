@@ -3,6 +3,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <print>
 #include <string>
+#include <vector>
 
 #include "config.h"
 #include "player.h"
@@ -43,20 +44,15 @@ Application::Application(const char* title, const uint width, const uint height,
   }
 
   m_Shader.load(Constants::VERTEX_PATH, Constants::FRAGMENT_PATH);
-  // Load block textures and bind to texture units
   try {
-    m_Textures[0].loadFromFile("resources/blocks/grass_top.png");
-    m_Textures[1].loadFromFile("resources/blocks/grass_top.png");
-    m_Textures[2].loadFromFile("resources/blocks/dirt.png");
+    m_TextureArray.loadFromFiles(
+        {"resources/blocks/grass_top.png", "resources/blocks/dirt.png"});
   } catch (const std::exception& e) {
     throw std::runtime_error(std::string("Failed to load textures: ") +
-                             e.what());
+                            e.what());
   }
 
-  // Bind textures to units (3 textures)
-  for (int i = 0; i < 3; ++i) {
-    m_Textures[i].bindToUnit(i);
-  }
+  m_TextureArray.bindToUnit(0);
 
   m_ChunkManager.load();
 
@@ -66,12 +62,10 @@ Application::Application(const char* title, const uint width, const uint height,
   m_Shader.newUniform("uModel");
   m_Shader.newUniform("uView");
   m_Shader.newUniform("uProjection");
-  m_Shader.newUniform("uTextures");
+  m_Shader.newUniform("uTextureArray");
 
-  // set sampler units
   m_Shader.use();
-  int texUnits[3] = {0, 1, 2};
-  m_Shader.setUniformIntArray("uTextures", texUnits, 3);
+  m_Shader.setUniformInt("uTextureArray", 0);
 }
 
 Application::~Application() {
