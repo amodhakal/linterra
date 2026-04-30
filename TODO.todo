@@ -1,0 +1,5 @@
+Milestone 5:
+    ✔ Setup diffusion-terrain-onnx hugging face as a submodule @done(26-04-29 23:46)
+    ✔ Setup diffusion model simplifcation @done(26-04-29 23:46)
+    ✔ Setup diffusion model quantization from FP32 to FP16 @done(26-04-29 23:45)
+    
