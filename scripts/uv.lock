@@ -120,6 +120,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/93/37/229570fd8ca86aca41ec893525950de95a33891521d63da3517162545dc8/onnx_simplifier-0.5.0.tar.gz", hash = "sha256:6f15c75a68161a618d5e2ef9fd5e9417fe296b13dd71560406b510fbf027825f", size = 728, upload-time = "2026-02-21T10:35:22Z" }
 
 [[package]]
+name = "onnxconverter-common"
+version = "1.16.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnx" },
+    { name = "packaging" },
+    { name = "protobuf" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4a/67/8dca1868a6e226f8d3f7d666cb6a48b79a60aad5267b16b24627cd8d9eb8/onnxconverter_common-1.16.0-py2.py3-none-any.whl", hash = "sha256:df39ee96f17fff119dff10dd245467651b60b9e8a96020eb93402239794852f7", size = 89511, upload-time = "2025-08-28T19:37:46.988Z" },
+]
+
+[[package]]
 name = "onnxruntime"
 version = "1.25.1"
 source = { registry = "https://pypi.org/simple" }
@@ -208,6 +222,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "onnx" },
     { name = "onnx-simplifier" },
+    { name = "onnxconverter-common" },
     { name = "onnxruntime" },
 ]
 
@@ -215,6 +230,7 @@ dependencies = [
 requires-dist = [
     { name = "onnx", specifier = ">=1.21.0" },
     { name = "onnx-simplifier", specifier = ">=0.5.0" },
+    { name = "onnxconverter-common", specifier = ">=1.16.0" },
     { name = "onnxruntime", specifier = ">=1.25.1" },
 ]
 

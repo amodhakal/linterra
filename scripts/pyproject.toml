@@ -7,5 +7,6 @@ requires-python = ">=3.14"
 dependencies = [
     "onnx>=1.21.0",
     "onnx-simplifier>=0.5.0",
+    "onnxconverter-common>=1.16.0",
     "onnxruntime>=1.25.1",
 ]
