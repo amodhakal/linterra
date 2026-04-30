@@ -1,0 +1,3 @@
+[submodule "models/terrain-diffusion"]
+	path = models/terrain-diffusion
+	url = https://huggingface.co/xandergos/terrain-diffusion-30m-onnx
