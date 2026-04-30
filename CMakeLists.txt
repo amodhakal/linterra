@@ -9,6 +9,8 @@ find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(glm REQUIRED)
 
+find_library(ONNXRUNTIME_LIBRARY NAMES onnxruntime PATHS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/onnxruntime/lib" NO_DEFAULT_PATH)
+
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp" "vendor/glad/src/glad.c" "vendor/noise/src/noise.cpp")
 add_executable(${PROJECT_NAME} ${SOURCES})
 
@@ -17,12 +19,14 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     vendor/glad/include
     vendor/noise/include
     vendor/images/include
+    vendor/onnxruntime/include
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     OpenGL::GL
     glfw
     glm::glm
+    ${ONNXRUNTIME_LIBRARY}
 )
 
 add_custom_command(
