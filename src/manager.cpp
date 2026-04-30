@@ -11,9 +11,41 @@
 
 #include "chunk.h"
 #include "config.h"
-#include "frustum.h"
+#include "Frustum.h"
+#include "terrain.h"
 
-void ChunkManager::load() {}
+#include <iostream>
+
+constexpr int TERRAIN_TILE_SIZE = 512;
+
+struct TerrainTile {
+    glm::vec2 position;
+    std::vector<float> data;
+    bool ready = false;
+};
+
+std::vector<std::shared_ptr<TerrainTile>> g_TerrainTiles;
+std::mutex g_TerrainMutex;
+
+std::shared_ptr<TerrainTile> getOrCreateTile(const glm::vec2& tilePos) {
+    std::lock_guard<std::mutex> lock(g_TerrainMutex);
+    for (auto& tile : g_TerrainTiles) {
+        if (tile->position == tilePos && tile->ready) {
+            return tile;
+        }
+    }
+    auto newTile = std::make_shared<TerrainTile>();
+    newTile->position = tilePos;
+    newTile->data.resize(TERRAIN_TILE_SIZE * TERRAIN_TILE_SIZE);
+    g_TerrainTiles.push_back(newTile);
+    return newTile;
+}
+
+void ChunkManager::load() {
+    std::cout << "[Manager] Initializing terrain generator..." << std::endl;
+    g_TerrainGenerator.init();
+    std::cout << "[Manager] Terrain generator ready" << std::endl;
+}
 
 void ChunkManager::render(const Camera *camera, Shader &shader) {
   glm::vec3 cameraPosition = camera->m_Position;
@@ -52,6 +84,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     result.chunk.pass();
 
     m_ProcessingPositions.erase(position);
+    result.chunk.printHeightMap();
     m_ProcessedChunks[position] = std::move(result.chunk);
     it = m_ProcessingChunks.erase(it);
   }
@@ -97,8 +130,24 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
 
       m_ProcessingPositions.insert(position);
       TaskResult &result = m_ProcessingChunks[position];
-      m_ThreadPool.enqueue([&result, position]() {
-        result.chunk.generateMeshData(position);
+
+      glm::vec2 tilePos(
+          std::floor(position.s * Constants::Chunk::LENGTH / TERRAIN_TILE_SIZE) * TERRAIN_TILE_SIZE,
+          std::floor(position.t * Constants::Chunk::LENGTH / TERRAIN_TILE_SIZE) * TERRAIN_TILE_SIZE);
+
+      uint32_t worldSeed = 1551611252;
+      uint32_t seed = worldSeed + static_cast<uint32_t>(std::hash<float>{}(tilePos.x) ^ (std::hash<float>{}(tilePos.y) << 1));
+
+      auto tile = getOrCreateTile(tilePos);
+
+      if (!tile->ready) {
+          std::cout << "[Manager] Generating terrain tile at (" << tilePos.x << ", " << tilePos.y << ")" << std::endl;
+          tile->data = g_TerrainGenerator.generate(tilePos, seed);
+          tile->ready = true;
+      }
+
+      m_ThreadPool.enqueue([&result, position, tile]() {
+        result.chunk.generateMeshData(position, tile->data.data());
         result.ready.store(true);
       });
     }

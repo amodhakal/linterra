@@ -3,50 +3,65 @@
 
 #include <cassert>
 #include <cmath>
+#include <iostream>
 
 #include "config.h"
 
-void Chunk::generateMeshData(const glm::vec2 &position) {
+void Chunk::generateMeshData(const glm::vec2 &position, const float* terrainData) {
   const size_t BX = Constants::Chunk::LENGTH;
   const size_t BY = Constants::Chunk::HEIGHT;
   const size_t BZ = Constants::Chunk::LENGTH;
 
-  auto getGrassHeight = [&](int bx, int bz) -> ushort {
-    float baseX = position.s * Constants::Chunk::LENGTH;
-    float baseZ = position.t * Constants::Chunk::LENGTH;
-    float noiseX = baseX + bx;
-    float noiseZ = baseZ + bz;
+  const int TERRAIN_RES = 512;
 
-    auto n = Noise::fbm(
-        glm::vec2(noiseX, noiseZ) * Constants::Noise::FREQUENCY,
-        Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
-    float noiseY = n.value;
-    noiseY /= 2.0f;
-    noiseY += 0.5f;
+  auto getTerrainHeight = [&](int worldX, int worldZ) -> ushort {
+    if (!terrainData) {
+      float noiseX = static_cast<float>(worldX);
+      float noiseZ = static_cast<float>(worldZ);
+      auto n = Noise::fbm(
+          glm::vec2(noiseX, noiseZ) * Constants::Noise::FREQUENCY,
+          Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
+      float noiseY = n.value;
+      noiseY /= 2.0f;
+      noiseY += 0.5f;
+      return static_cast<ushort>(std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
+    }
 
-    return static_cast<ushort>(
-        std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
-  };
+    float safeX = std::fmod(static_cast<float>(worldX), static_cast<float>(TERRAIN_RES));
+    if (safeX < 0) safeX += TERRAIN_RES;
+    float safeZ = std::fmod(static_cast<float>(worldZ), static_cast<float>(TERRAIN_RES));
+    if (safeZ < 0) safeZ += TERRAIN_RES;
 
-  auto getNeighborHeight = [&](int nx, int nz) -> ushort {
-    int worldX = static_cast<int>(position.s) * Constants::Chunk::LENGTH + nx;
-    int worldZ = static_cast<int>(position.t) * Constants::Chunk::LENGTH + nz;
+    int x1 = static_cast<int>(safeX);
+    int z1 = static_cast<int>(safeZ);
+    int x2 = (x1 + 1) % TERRAIN_RES;
+    int z2 = (z1 + 1) % TERRAIN_RES;
 
-    auto n = Noise::fbm(
-        glm::vec2(static_cast<float>(worldX), static_cast<float>(worldZ)) * Constants::Noise::FREQUENCY,
-        Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
-    float noiseY = n.value;
-    noiseY /= 2.0f;
-    noiseY += 0.5f;
+    float blendX = safeX - static_cast<float>(x1);
+    float blendZ = safeZ - static_cast<float>(z1);
 
-    return static_cast<ushort>(
-        std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
+    float h00 = terrainData[z1 * TERRAIN_RES + x1];
+    float h10 = terrainData[z1 * TERRAIN_RES + x2];
+    float h01 = terrainData[z2 * TERRAIN_RES + x1];
+    float h11 = terrainData[z2 * TERRAIN_RES + x2];
+
+    float topBlend = h00 + blendX * (h10 - h00);
+    float botBlend = h01 + blendX * (h11 - h01);
+    float h = topBlend + blendZ * (botBlend - topBlend);
+
+    float minH = -132.0f;
+    float maxH = 195.0f;
+    h = (h - minH) / (maxH - minH);
+    h = glm::clamp(h, 0.0f, 1.0f);
+
+    return static_cast<ushort>(std::floor(h * Constants::Chunk::MAX_BLOCK_HEIGHT));
   };
 
   for (uint blockX = 0; blockX < Constants::Chunk::LENGTH; blockX++) {
     for (uint blockZ = 0; blockZ < Constants::Chunk::LENGTH; blockZ++) {
-      ushort grassHeight = getGrassHeight(blockX, blockZ);
-      m_HeightMap[blockX][blockZ] = grassHeight;
+      int worldX = static_cast<int>(position.s) * Constants::Chunk::LENGTH + blockX;
+      int worldZ = static_cast<int>(position.t) * Constants::Chunk::LENGTH + blockZ;
+      m_HeightMap[blockX][blockZ] = getTerrainHeight(worldX, worldZ);
     }
   }
 
@@ -136,7 +151,9 @@ auto isBlockExposed = [&](int x, int y, int z, int dir) -> bool {
     ushort neighborHeight;
     if (nx < 0 || nz < 0 || nx >= static_cast<int>(BX) ||
         nz >= static_cast<int>(BZ)) {
-      neighborHeight = getNeighborHeight(nx, nz);
+      int worldX = static_cast<int>(position.s) * Constants::Chunk::LENGTH + nx;
+      int worldZ = static_cast<int>(position.t) * Constants::Chunk::LENGTH + nz;
+      neighborHeight = getTerrainHeight(worldX, worldZ);
     } else {
       neighborHeight = m_HeightMap[nx][nz];
     }
@@ -251,6 +268,16 @@ void Chunk::render() {
   glBindVertexArray(m_VAO);
   glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_IndexCount),
                  GL_UNSIGNED_INT, 0);
+}
+
+void Chunk::printHeightMap() const {
+  std::cout << "HeightMap (16x16):" << std::endl;
+  for (uint z = 0; z < Constants::Chunk::LENGTH; z++) {
+    for (uint x = 0; x < Constants::Chunk::LENGTH; x++) {
+      std::cout << static_cast<int>(m_HeightMap[x][z]) << " ";
+    }
+    std::cout << std::endl;
+  }
 }
 
 ushort Chunk::getHighestBlockY(uint blockX, uint blockZ) {

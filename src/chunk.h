@@ -32,11 +32,12 @@ class Chunk {
 public:
   Chunk() = default;
 
-  void generateMeshData(const glm::vec2 &position);
+  void generateMeshData(const glm::vec2 &position, const float* terrainData = nullptr);
 
   void pass();
   void render();
   void cleanup();
+  void printHeightMap() const;
   ushort getHighestBlockY(uint blockX, uint blockZ);
 
 private:
