@@ -3,9 +3,12 @@
 #include <noise/noise.h>
 
 namespace {
+uint32_t g_Seed = 0;
+
 inline float hash21(int32_t x, int32_t y) {
   uint32_t n = static_cast<uint32_t>(x) + static_cast<uint32_t>(y) * 57u;
   n = (n << 13) ^ n;
+  n ^= g_Seed;
   uint32_t nn = (n * (n * n * 15731u + 789221u) + 1376312589u) & 0x7fffffffu;
   return 1.0f - static_cast<float>(nn) / 1073741824.0f; // -> [-1,1]
 }
@@ -80,6 +83,14 @@ Noise2D fbm(const glm::vec2 &p, int octaves, float lacunarity, float gain) {
 
   Noise2D out = {value, deriv};
   return out;
+}
+
+void setSeed(uint32_t seed) {
+  g_Seed = seed;
+}
+
+uint32_t getSeed() {
+  return g_Seed;
 }
 
 } // namespace Noise
