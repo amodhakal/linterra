@@ -6,8 +6,10 @@
 
 ## What is Linterra?
 
+
 Linterra is a from-scratch, Minecraft-style voxel engine written in modern C++ and OpenGL. This project is an ongoing exploration into building a voxel engine from scratch. It is not a playable game yet; the focus so far has been designing the underlying systems that make an infinite, block-based world possible.
 
+![Screenshot of the game](/docs//screenshot.png)
 
 ## Implemented Features
 
