@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -10,11 +11,14 @@
 #include "shader.h"
 #include "threadpool.h"
 
+class IRenderer;
+
 struct TaskResult {
   Chunk chunk;
   std::atomic<bool> uploadReady{false};
 
-  TaskResult() = default;
+  TaskResult() = delete;
+  explicit TaskResult(IRenderer* renderer) : chunk(renderer) {}
 
   TaskResult(TaskResult &&other) noexcept
       : chunk(std::move(other.chunk)),
@@ -50,8 +54,7 @@ struct hash<glm::vec2> {
 
 class ChunkManager {
 public:
-  ChunkManager() = default;
-
+  explicit ChunkManager(IRenderer* renderer);
   void load();
 
   void render(const Camera *camera, Shader &shader);
@@ -62,6 +65,7 @@ private:
   static float getChunkDistanceSquared(const glm::vec2 &chunkPos,
                                       const glm::vec3 &cameraPos);
 
+  IRenderer* m_Renderer = nullptr;
   std::unordered_map<glm::vec2, Chunk> m_ProcessedChunks;
   std::unordered_set<glm::vec2> m_ProcessingPositions;
 

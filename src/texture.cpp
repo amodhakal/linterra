@@ -3,18 +3,21 @@
 #include "texture.h"
 
 #include <glad/glad.h>
-
 #include <stdexcept>
-#include <string>
 #include <utility>
 #include <vector>
 
+#include "renderer/renderer.hpp"
+
+Texture::Texture(IRenderer* renderer) : m_Renderer(renderer) {}
+
 Texture::Texture(Texture&& other) noexcept
-    : m_Id(other.m_Id),
+    : m_Renderer(other.m_Renderer),
+      m_Texture(std::move(other.m_Texture)),
       m_Width(other.m_Width),
       m_Height(other.m_Height),
       m_Layers(other.m_Layers) {
-  other.m_Id = 0;
+  other.m_Renderer = nullptr;
   other.m_Width = 0;
   other.m_Height = 0;
   other.m_Layers = 0;
@@ -22,14 +25,12 @@ Texture::Texture(Texture&& other) noexcept
 
 Texture& Texture::operator=(Texture&& other) noexcept {
   if (this != &other) {
-    if (m_Id != 0) {
-      glDeleteTextures(1, &m_Id);
-    }
-    m_Id = other.m_Id;
+    m_Renderer = other.m_Renderer;
+    m_Texture = std::move(other.m_Texture);
     m_Width = other.m_Width;
     m_Height = other.m_Height;
     m_Layers = other.m_Layers;
-    other.m_Id = 0;
+    other.m_Renderer = nullptr;
     other.m_Width = 0;
     other.m_Height = 0;
     other.m_Layers = 0;
@@ -67,24 +68,25 @@ void Texture::loadFromFiles(const std::vector<std::string>& paths) {
   m_Height = heights[static_cast<size_t>(0)];
   m_Layers = static_cast<std::int32_t>(paths.size());
 
-  glGenTextures(1, &m_Id);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, m_Id);
+  m_Texture = m_Renderer->createTexture(TextureType::Texture2DArray);
 
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER,
-                  GL_LINEAR_MIPMAP_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  m_Texture->bind(0);
 
-  glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA, m_Width, m_Height, m_Layers, 0,
-               GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+  m_Renderer->setTextureParameter(*m_Texture, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  m_Renderer->setTextureParameter(*m_Texture, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  m_Renderer->setTextureParameter(*m_Texture, GL_TEXTURE_MIN_FILTER,
+                                  GL_LINEAR_MIPMAP_LINEAR);
+  m_Renderer->setTextureParameter(*m_Texture, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  m_Renderer->setTextureImage2DArray(*m_Texture, m_Width, m_Height, m_Layers, nullptr);
 
   for (std::int32_t layer = 0; layer < m_Layers; ++layer) {
+    m_Texture->bind(0);
     glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, layer, m_Width, m_Height, 1,
                     GL_RGBA, GL_UNSIGNED_BYTE, images[static_cast<size_t>(layer)]);
   }
 
-  glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+  m_Renderer->generateMipmaps(*m_Texture);
 
   for (auto* img : images) {
     stbi_image_free(img);
@@ -92,12 +94,13 @@ void Texture::loadFromFiles(const std::vector<std::string>& paths) {
 }
 
 void Texture::bindToUnit(std::int32_t unit) const {
-  glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
-  glBindTexture(GL_TEXTURE_2D_ARRAY, m_Id);
-}
-
-Texture::~Texture() {
-  if (m_Id != 0) {
-    glDeleteTextures(1, &m_Id);
+  if (m_Texture) {
+    m_Texture->bind(unit);
   }
 }
+
+std::uint32_t Texture::getId() const {
+  return m_Texture ? m_Texture->getId() : 0;
+}
+
+Texture::~Texture() = default;

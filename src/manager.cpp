@@ -11,6 +11,7 @@
 #include "chunk.h"
 #include "config.h"
 #include "frustum.h"
+#include "renderer/renderer.hpp"
 
 namespace {
 
@@ -19,6 +20,8 @@ constexpr float kChunkBlockExtent =
 constexpr float kChunkCenterOffset = kChunkBlockExtent * 0.5f;
 
 } // namespace
+
+ChunkManager::ChunkManager(IRenderer* renderer) : m_Renderer(renderer) {}
 
 float ChunkManager::getChunkDistanceSquared(const glm::vec2 &chunkPos,
                                             const glm::vec3 &cameraPos) {
@@ -68,7 +71,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       it = m_ProcessingChunks.erase(it);
     }
 
-    m_ProcessedChunks[position] = std::move(promoted);
+    m_ProcessedChunks.try_emplace(position, std::move(promoted));
   }
 
   const int32_t currentChunkX = static_cast<int32_t>(
@@ -99,7 +102,8 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
           continue;
         }
         m_ProcessingPositions.insert(position);
-        resultPtr = &m_ProcessingChunks[position];
+        auto [it, inserted] = m_ProcessingChunks.try_emplace(position, m_Renderer);
+        resultPtr = &it->second;
       }
 
       TaskResult &result = *resultPtr;
@@ -155,7 +159,7 @@ float ChunkManager::getPositionHighestY(const glm::vec3 &cameraPosition) {
       std::clamp(localZ, 0, static_cast<int32_t>(Constants::Chunk::LENGTH - 1));
 
   if (m_ProcessedChunks.contains(chunkPosition)) {
-    Chunk &chunk = m_ProcessedChunks[chunkPosition];
+    Chunk &chunk = m_ProcessedChunks.at(chunkPosition);
     return static_cast<float>(chunk.getHighestBlockY(
         static_cast<uint32_t>(localX), static_cast<uint32_t>(localZ)));
   }

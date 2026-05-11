@@ -1,14 +1,18 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include <glm/glm.hpp>
 #include <string>
 #include <unordered_map>
 
+class IRenderer;
+class IShaderProgram;
+
 class Shader {
  public:
-  Shader();
+  explicit Shader(IRenderer* renderer);
   ~Shader();
 
   Shader(const Shader&) = delete;
@@ -28,6 +32,7 @@ class Shader {
   void setUniformVec3(const char* name, glm::vec3 value);
 
  private:
-  std::uint32_t m_Id = 0;
+  IRenderer* m_Renderer = nullptr;
+  std::unique_ptr<IShaderProgram> m_Program;
   std::unordered_map<std::string, int> m_Uniforms;
 };

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <print>
 
 #include "config.h"
@@ -7,6 +8,8 @@
 #include "player.h"
 #include "shader.h"
 #include "texture.h"
+
+class IRenderer;
 
 class Application {
  public:
@@ -20,11 +23,13 @@ class Application {
 
  private:
   GLFWwindow* m_Window;
+  std::unique_ptr<IRenderer> m_Renderer;
   Shader m_Shader;
   ChunkManager m_ChunkManager;
   Player m_Player;
   Texture m_TextureArray;
 
+  glm::vec4 m_BgColor;
   uint m_FpsAttempts;
   float m_CombinedDeltaTime;
   float m_lastFrame;

@@ -1,11 +1,16 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <glad/glad.h>
 
 #include "config.h"
+
+class IRenderer;
+class IBuffer;
+class IVertexArray;
 
 enum BlockType : uint8_t { AIR = 0, GRASS = 1, DIRT = 2 };
 
@@ -31,7 +36,7 @@ union PackedVertex {
 
 class Chunk {
 public:
-  Chunk();
+  explicit Chunk(IRenderer* renderer);
 
   ~Chunk();
 
@@ -49,9 +54,10 @@ public:
   uint16_t getHighestBlockY(uint32_t blockX, uint32_t blockZ);
 
 private:
-  uint32_t m_VAO;
-  uint32_t m_VBO;
-  uint32_t m_EBO;
+  IRenderer* m_Renderer = nullptr;
+  std::unique_ptr<IBuffer> m_VBO;
+  std::unique_ptr<IBuffer> m_EBO;
+  std::unique_ptr<IVertexArray> m_VAO;
   uint32_t m_VboSize;
   uint32_t m_IndexCount;
 

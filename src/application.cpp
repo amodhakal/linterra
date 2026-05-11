@@ -9,13 +9,17 @@
 
 #include "config.h"
 #include "player.h"
+#include "renderer/renderer.hpp"
 #include "shader.h"
 
 Application::Application(const char* title, const uint width, const uint height,
                          glm::vec4 bgColor)
-    : m_Shader(),
-      m_ChunkManager(),
+    : m_Renderer(createRenderer(RenderBackend::OpenGL)),
+      m_Shader(m_Renderer.get()),
+      m_ChunkManager(m_Renderer.get()),
       m_Player(Constants::Camera::DEFAULT_POSITION),
+      m_TextureArray(m_Renderer.get()),
+      m_BgColor(bgColor),
       m_FpsAttempts(0),
       m_CombinedDeltaTime(0),
       m_lastFrame(0)
@@ -25,7 +29,10 @@ Application::Application(const char* title, const uint width, const uint height,
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
+#if defined(__APPLE__)
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+#endif
 
   m_Window = glfwCreateWindow(width, height, title, nullptr, nullptr);
   if (!m_Window) {
@@ -33,7 +40,7 @@ Application::Application(const char* title, const uint width, const uint height,
   }
 
   glfwMakeContextCurrent(m_Window);
-  glfwSwapInterval(0);  // Disable V-Sync
+  glfwSwapInterval(0);
 
   glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
   glfwSetCursorPosCallback(m_Window, handleMouseCallback);
@@ -58,8 +65,8 @@ Application::Application(const char* title, const uint width, const uint height,
 
   m_ChunkManager.load();
 
-  glEnable(GL_DEPTH_TEST);
-  glClearColor(bgColor[0], bgColor[1], bgColor[2], bgColor[3]);
+  m_Renderer->enable(Feature::DepthTest);
+  m_Renderer->clear(bgColor);
 
   m_Shader.newUniform("uModel");
   m_Shader.newUniform("uView");
@@ -87,7 +94,7 @@ bool Application::isRunning() {
 void Application::update() {
   float deltaTime = getDeltaTime();
   handleKeyPress(deltaTime);
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  m_Renderer->clear(m_BgColor);
 
   glm::mat4 view = m_Player.getView();
   glm::mat4 projection = m_Player.getProjection();

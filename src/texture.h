@@ -1,14 +1,18 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 
 #include <stb/image.h>
 #include <string>
 #include <vector>
 
+class IRenderer;
+class ITexture;
+
 class Texture {
  public:
-  Texture() = default;
+  explicit Texture(IRenderer* renderer);
   ~Texture();
 
   Texture(const Texture&) = delete;
@@ -20,10 +24,11 @@ class Texture {
 
   void bindToUnit(std::int32_t unit) const;
 
-  [[nodiscard]] std::uint32_t getId() const { return m_Id; }
+  [[nodiscard]] std::uint32_t getId() const;
 
  private:
-  std::uint32_t m_Id = 0;
+  IRenderer* m_Renderer = nullptr;
+  std::unique_ptr<ITexture> m_Texture;
   std::int32_t m_Width = 0;
   std::int32_t m_Height = 0;
   std::int32_t m_Layers = 0;

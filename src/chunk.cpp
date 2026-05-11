@@ -5,14 +5,20 @@
 #include <utility>
 
 #include "config.h"
+#include "renderer/renderer.hpp"
 
-Chunk::Chunk()
-    : m_VAO(0), m_VBO(0), m_EBO(0), m_VboSize(0), m_IndexCount(0) {}
+Chunk::Chunk(IRenderer* renderer)
+    : m_Renderer(renderer), m_VboSize(0), m_IndexCount(0) {}
 
 Chunk::Chunk(Chunk &&other) noexcept
-    : m_VAO(other.m_VAO), m_VBO(other.m_VBO), m_EBO(other.m_EBO),
-      m_VboSize(other.m_VboSize), m_IndexCount(other.m_IndexCount),
-      m_Data(std::move(other.m_Data)), m_Indices(std::move(other.m_Indices)) {
+    : m_Renderer(other.m_Renderer),
+      m_VBO(std::move(other.m_VBO)),
+      m_EBO(std::move(other.m_EBO)),
+      m_VAO(std::move(other.m_VAO)),
+      m_VboSize(other.m_VboSize),
+      m_IndexCount(other.m_IndexCount),
+      m_Data(std::move(other.m_Data)),
+      m_Indices(std::move(other.m_Indices)) {
   for (int32_t i = 0; i < Constants::Chunk::LENGTH; ++i) {
     for (int32_t j = 0; j < Constants::Chunk::LENGTH; ++j) {
       m_HeightMap[i][j] = other.m_HeightMap[i][j];
@@ -24,9 +30,7 @@ Chunk::Chunk(Chunk &&other) noexcept
     }
   }
 
-  other.m_VAO = 0;
-  other.m_VBO = 0;
-  other.m_EBO = 0;
+  other.m_Renderer = nullptr;
   other.m_VboSize = 0;
   other.m_IndexCount = 0;
 }
@@ -36,9 +40,10 @@ Chunk &Chunk::operator=(Chunk &&other) noexcept {
     return *this;
   }
   cleanup();
-  m_VAO = other.m_VAO;
-  m_VBO = other.m_VBO;
-  m_EBO = other.m_EBO;
+  m_Renderer = other.m_Renderer;
+  m_VBO = std::move(other.m_VBO);
+  m_EBO = std::move(other.m_EBO);
+  m_VAO = std::move(other.m_VAO);
   m_VboSize = other.m_VboSize;
   m_IndexCount = other.m_IndexCount;
   m_Data = std::move(other.m_Data);
@@ -54,9 +59,7 @@ Chunk &Chunk::operator=(Chunk &&other) noexcept {
     }
   }
 
-  other.m_VAO = 0;
-  other.m_VBO = 0;
-  other.m_EBO = 0;
+  other.m_Renderer = nullptr;
   other.m_VboSize = 0;
   other.m_IndexCount = 0;
 
@@ -285,34 +288,23 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
 }
 
 void Chunk::pass() {
-  if (m_VAO != 0) {
-    glDeleteVertexArrays(1, &m_VAO);
-    m_VAO = 0;
-  }
-  if (m_VBO != 0) {
-    glDeleteBuffers(1, &m_VBO);
-    m_VBO = 0;
-  }
-  if (m_EBO != 0) {
-    glDeleteBuffers(1, &m_EBO);
-    m_EBO = 0;
-  }
+  if (!m_Renderer) return;
 
-  glGenVertexArrays(1, &m_VAO);
-  glGenBuffers(1, &m_VBO);
-  glGenBuffers(1, &m_EBO);
+  m_VAO = m_Renderer->createVertexArray();
+  m_VBO = m_Renderer->createBuffer(BufferType::Vertex);
+  m_EBO = m_Renderer->createBuffer(BufferType::Index);
 
-  glBindVertexArray(m_VAO);
+  m_Renderer->bindVertexArray(*m_VAO);
 
-  glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-  glBufferData(GL_ARRAY_BUFFER,
-               static_cast<GLsizeiptr>(m_Data.size() * sizeof(PackedVertex)),
-               m_Data.data(), GL_STATIC_DRAW);
+  m_VBO->bind();
+  m_Renderer->setBufferData(*m_VBO, m_Data.data(),
+                            m_Data.size() * sizeof(PackedVertex),
+                            BufferUsage::Static);
 
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-               static_cast<GLsizeiptr>(m_Indices.size() * sizeof(uint32_t)),
-               m_Indices.data(), GL_STATIC_DRAW);
+  m_EBO->bind();
+  m_Renderer->setBufferData(*m_EBO, m_Indices.data(),
+                            m_Indices.size() * sizeof(uint32_t),
+                            BufferUsage::Static);
 
   m_IndexCount = static_cast<uint32_t>(m_Indices.size());
   m_VboSize = static_cast<uint32_t>(m_Data.size());
@@ -322,36 +314,29 @@ void Chunk::pass() {
   m_Data.shrink_to_fit();
   m_Indices.shrink_to_fit();
 
-  glVertexAttribPointer(0, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(PackedVertex),
-                        static_cast<void *>(nullptr));
-  glEnableVertexAttribArray(0);
+  m_Renderer->setVertexAttribute(*m_VAO, 0, 1, DataType::UnsignedInt, false,
+                                sizeof(PackedVertex), 0);
+  m_Renderer->enableVertexAttribute(*m_VAO, 0);
 
   if (Constants::DO_TRIANGLE_LINE) {
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    m_Renderer->setPolygonMode(true);
   }
 }
 
 void Chunk::cleanup() {
-  if (m_VBO != 0) {
-    glDeleteBuffers(1, &m_VBO);
-    m_VBO = 0;
-  }
-  if (m_EBO != 0) {
-    glDeleteBuffers(1, &m_EBO);
-    m_EBO = 0;
-  }
-  if (m_VAO != 0) {
-    glDeleteVertexArrays(1, &m_VAO);
-    m_VAO = 0;
-  }
+  m_VBO.reset();
+  m_EBO.reset();
+  m_VAO.reset();
   m_IndexCount = 0;
   m_VboSize = 0;
 }
 
 void Chunk::render() {
-  glBindVertexArray(m_VAO);
-  glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_IndexCount),
-                 GL_UNSIGNED_INT, nullptr);
+  if (m_VAO && m_Renderer) {
+    m_Renderer->bindVertexArray(*m_VAO);
+    m_Renderer->drawIndexed(PrimitiveType::Triangles, m_IndexCount, 0,
+                            IndexType::UnsignedInt);
+  }
 }
 
 uint16_t Chunk::getHighestBlockY(uint32_t blockX, uint32_t blockZ) {
