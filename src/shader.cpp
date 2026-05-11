@@ -2,19 +2,23 @@
 #include "shader.h"
 
 #include <glm/gtc/type_ptr.hpp>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "io.h"
 
-uint setupShaders(const char* filePath, const uint shaderType) {
+namespace {
+
+GLuint setupShaders(const char* filePath, GLenum shaderType) {
   const std::string shaderCodeRaw = IO::getFullFileContents(filePath);
   const char* shaderCode = shaderCodeRaw.c_str();
 
-  uint shader = glCreateShader(shaderType);
+  GLuint shader = glCreateShader(shaderType);
   glShaderSource(shader, 1, &shaderCode, nullptr);
   glCompileShader(shader);
 
-  int success;
+  GLint success = 0;
   char infoLog[512];
 
   glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
@@ -27,23 +31,58 @@ uint setupShaders(const char* filePath, const uint shaderType) {
   return shader;
 }
 
-Shader::Shader() : m_Uniforms({}) {
+}  // namespace
+
+Shader::Shader() = default;
+
+Shader::~Shader() {
+  if (m_Id != 0) {
+    glDeleteProgram(m_Id);
+    m_Id = 0;
+  }
+}
+
+Shader::Shader(Shader&& other) noexcept
+    : m_Id(other.m_Id), m_Uniforms(std::move(other.m_Uniforms)) {
+  other.m_Id = 0;
+  other.m_Uniforms.clear();
+}
+
+Shader& Shader::operator=(Shader&& other) noexcept {
+  if (this != &other) {
+    if (m_Id != 0) {
+      glDeleteProgram(m_Id);
+    }
+    m_Id = other.m_Id;
+    m_Uniforms = std::move(other.m_Uniforms);
+    other.m_Id = 0;
+    other.m_Uniforms.clear();
+  }
+  return *this;
 }
 
 void Shader::load(const char* vertexPath, const char* fragmentPath) {
-  uint vertexShader = setupShaders(vertexPath, GL_VERTEX_SHADER);
-  uint fragmentShader = setupShaders(fragmentPath, GL_FRAGMENT_SHADER);
+  if (m_Id != 0) {
+    glDeleteProgram(m_Id);
+    m_Id = 0;
+    m_Uniforms.clear();
+  }
 
-  int success;
+  GLuint vertexShader = setupShaders(vertexPath, GL_VERTEX_SHADER);
+  GLuint fragmentShader = setupShaders(fragmentPath, GL_FRAGMENT_SHADER);
+
+  GLint success = 0;
   char infoLog[512];
 
-  uint shaderProgram = glCreateProgram();
+  GLuint shaderProgram = glCreateProgram();
   glAttachShader(shaderProgram, vertexShader);
   glAttachShader(shaderProgram, fragmentShader);
   glLinkProgram(shaderProgram);
   glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
   if (!success) {
-    glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
+    glGetProgramInfoLog(shaderProgram, 512, nullptr, infoLog);
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
     throw std::runtime_error("Shader linking: " + std::string(infoLog));
   }
 
@@ -57,7 +96,7 @@ void Shader::use() {
   glUseProgram(m_Id);
 }
 
-uint Shader::getId() {
+std::uint32_t Shader::getId() const {
   return m_Id;
 }
 

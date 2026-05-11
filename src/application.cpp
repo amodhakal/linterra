@@ -1,5 +1,7 @@
 #include "application.h"
 
+#include <cstdint>
+
 #include <glm/gtc/type_ptr.hpp>
 #include <print>
 #include <string>
@@ -117,7 +119,7 @@ float Application::getDeltaTime() {
   m_CombinedDeltaTime += deltaTime;
   m_FpsAttempts++;
 
-  constexpr uint MAX_ATTEMPTS = 100;
+  constexpr std::uint32_t MAX_ATTEMPTS = 100;
   if (m_FpsAttempts >= MAX_ATTEMPTS) {
     std::println("FPS: {}",
                  std::to_string(1 / (m_CombinedDeltaTime / MAX_ATTEMPTS)));
@@ -132,10 +134,8 @@ void Application::processMouseInput(double xPosition, double yPosition) {
   return m_Player.processMouseInput(xPosition, yPosition);
 }
 
-void Application::processScrollInput(double xOffset, double yOffset) {
-  // TODO No fov change here
-  // return m_Player.getCamera()->processScrollInput(xOffset, yOffset);
-}
+void Application::processScrollInput([[maybe_unused]] double xOffset,
+                                   [[maybe_unused]] double yOffset) {}
 
 void Application::handleKeyPress(float deltaTime) {
   if (glfwGetKey(m_Window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {

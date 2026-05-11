@@ -13,6 +13,29 @@ Linterra is a from-scratch, Minecraft-style voxel engine written in modern C++ a
 
 ## Implemented Features
 
+### Milestone 5 — Chunk Pipeline Throughput, Thread Safety, and RAII Cleanup
+
+This milestone focused on reducing chunk-generation stalls, removing key thread-safety hazards, and tightening resource lifetime management across the render pipeline.
+
+**Chunk Generation Performance**
+- Added an extended chunk-border heightmap cache so border exposure checks use direct array lookups instead of repeatedly calling noise functions.
+- Consolidated duplicated chunk distance math into a shared helper in `ChunkManager` for both culling and spawn decisions.
+- Moved chunk GPU upload commit to a main-thread-ready gate so worker threads only prepare mesh CPU data before signaling upload readiness.
+
+**Threading & Race Condition Fixes**
+- Added mutex-protected access around processing containers used by worker/main thread handoff.
+- Ensured promotion/removal of in-flight chunk tasks is synchronized to avoid data races under load.
+
+**Code Quality & Maintainability**
+- Corrected configuration constant typos (`JUMP_VELOCITY`, `DEFAULT_PITCH`) and aligned usages.
+- Standardized integer typing across touched systems toward `<cstdint>`-based types.
+- Split `Player` implementation out of the header into `player.cpp` to reduce header bloat and avoid ODR-risk patterns.
+- Removed dead commented callback code and deleted the unused `image.cpp` stub.
+
+**OpenGL Resource Lifetime Improvements**
+- Added RAII cleanup for shader programs (`glDeleteProgram`) via `Shader` destructor and safe move semantics.
+- Improved chunk/texture resource move and cleanup behavior to prevent leaks or double-delete scenarios when objects are transferred.
+
 ### Milestone 4 — Architecture Overhaul & Memory Optimization
 
 This milestone focused on restructuring the engine to support massive render distances (up to 64 chunks) while heavily optimizing memory consumption and setting up the foundation for asynchronous processing.

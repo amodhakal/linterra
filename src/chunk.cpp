@@ -1,94 +1,150 @@
 #include "chunk.h"
 #include <noise/noise.h>
 
-#include <cassert>
 #include <cmath>
+#include <utility>
 
 #include "config.h"
 
+Chunk::Chunk()
+    : m_VAO(0), m_VBO(0), m_EBO(0), m_VboSize(0), m_IndexCount(0) {}
+
+Chunk::Chunk(Chunk &&other) noexcept
+    : m_VAO(other.m_VAO), m_VBO(other.m_VBO), m_EBO(other.m_EBO),
+      m_VboSize(other.m_VboSize), m_IndexCount(other.m_IndexCount),
+      m_Data(std::move(other.m_Data)), m_Indices(std::move(other.m_Indices)) {
+  for (int32_t i = 0; i < Constants::Chunk::LENGTH; ++i) {
+    for (int32_t j = 0; j < Constants::Chunk::LENGTH; ++j) {
+      m_HeightMap[i][j] = other.m_HeightMap[i][j];
+    }
+  }
+  for (uint32_t i = 0; i < kExtSide; ++i) {
+    for (uint32_t j = 0; j < kExtSide; ++j) {
+      m_ExtendedHeightMap[i][j] = other.m_ExtendedHeightMap[i][j];
+    }
+  }
+
+  other.m_VAO = 0;
+  other.m_VBO = 0;
+  other.m_EBO = 0;
+  other.m_VboSize = 0;
+  other.m_IndexCount = 0;
+}
+
+Chunk &Chunk::operator=(Chunk &&other) noexcept {
+  if (this == &other) {
+    return *this;
+  }
+  cleanup();
+  m_VAO = other.m_VAO;
+  m_VBO = other.m_VBO;
+  m_EBO = other.m_EBO;
+  m_VboSize = other.m_VboSize;
+  m_IndexCount = other.m_IndexCount;
+  m_Data = std::move(other.m_Data);
+  m_Indices = std::move(other.m_Indices);
+  for (int32_t i = 0; i < Constants::Chunk::LENGTH; ++i) {
+    for (int32_t j = 0; j < Constants::Chunk::LENGTH; ++j) {
+      m_HeightMap[i][j] = other.m_HeightMap[i][j];
+    }
+  }
+  for (uint32_t i = 0; i < kExtSide; ++i) {
+    for (uint32_t j = 0; j < kExtSide; ++j) {
+      m_ExtendedHeightMap[i][j] = other.m_ExtendedHeightMap[i][j];
+    }
+  }
+
+  other.m_VAO = 0;
+  other.m_VBO = 0;
+  other.m_EBO = 0;
+  other.m_VboSize = 0;
+  other.m_IndexCount = 0;
+
+  return *this;
+}
+
+Chunk::~Chunk() { cleanup(); }
+
 void Chunk::generateMeshData(const glm::vec2 &position) {
-  const size_t BX = Constants::Chunk::LENGTH;
-  const size_t BY = Constants::Chunk::HEIGHT;
-  const size_t BZ = Constants::Chunk::LENGTH;
+  const int32_t BX = Constants::Chunk::LENGTH;
+  const size_t BY = static_cast<size_t>(Constants::Chunk::HEIGHT);
+  const int32_t BZ = Constants::Chunk::LENGTH;
 
-  auto getGrassHeight = [&](int bx, int bz) -> ushort {
-    float baseX = position.s * Constants::Chunk::LENGTH;
-    float baseZ = position.t * Constants::Chunk::LENGTH;
-    float noiseX = baseX + bx;
-    float noiseZ = baseZ + bz;
+  const float baseX = position.s * static_cast<float>(Constants::Chunk::LENGTH);
+  const float baseZ = position.t * static_cast<float>(Constants::Chunk::LENGTH);
 
+  auto sampleGrassHeightWorld = [&](float worldBlockX, float worldBlockZ) -> uint16_t {
     auto n = Noise::fbm(
-        glm::vec2(noiseX, noiseZ) * Constants::Noise::FREQUENCY,
-        Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
+        glm::vec2(worldBlockX, worldBlockZ) * Constants::Noise::FREQUENCY,
+        Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY,
+        Constants::Noise::FRACTAL_GAIN);
     float noiseY = n.value;
     noiseY /= 2.0f;
     noiseY += 0.5f;
 
-    return static_cast<ushort>(
-        std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
+    return static_cast<uint16_t>(
+        std::floor(noiseY * static_cast<float>(Constants::Chunk::MAX_BLOCK_HEIGHT)));
   };
 
-  auto getNeighborHeight = [&](int nx, int nz) -> ushort {
-    int worldX = static_cast<int>(position.s) * Constants::Chunk::LENGTH + nx;
-    int worldZ = static_cast<int>(position.t) * Constants::Chunk::LENGTH + nz;
+  for (uint32_t ex = 0; ex < kExtSide; ex++) {
+    for (uint32_t ez = 0; ez < kExtSide; ez++) {
+      const float noiseX =
+          baseX + static_cast<float>(static_cast<int32_t>(ex) - 1);
+      const float noiseZ =
+          baseZ + static_cast<float>(static_cast<int32_t>(ez) - 1);
+      m_ExtendedHeightMap[ex][ez] =
+          sampleGrassHeightWorld(noiseX, noiseZ);
+    }
+  }
 
-    auto n = Noise::fbm(
-        glm::vec2(static_cast<float>(worldX), static_cast<float>(worldZ)) * Constants::Noise::FREQUENCY,
-        Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY, Constants::Noise::FRACTAL_GAIN);
-    float noiseY = n.value;
-    noiseY /= 2.0f;
-    noiseY += 0.5f;
-
-    return static_cast<ushort>(
-        std::floor(noiseY * Constants::Chunk::MAX_BLOCK_HEIGHT));
-  };
-
-  for (uint blockX = 0; blockX < Constants::Chunk::LENGTH; blockX++) {
-    for (uint blockZ = 0; blockZ < Constants::Chunk::LENGTH; blockZ++) {
-      ushort grassHeight = getGrassHeight(blockX, blockZ);
-      m_HeightMap[blockX][blockZ] = grassHeight;
+  for (int32_t x = 0; x < BX; ++x) {
+    for (int32_t z = 0; z < BZ; ++z) {
+      m_HeightMap[x][z] = m_ExtendedHeightMap[static_cast<uint32_t>(x + 1)]
+                                         [static_cast<uint32_t>(z + 1)];
     }
   }
 
   m_Data.clear();
   m_Indices.clear();
 
-  // Map (block type, face normal) -> texture unit id
-  auto blockTextureId = [&](BlockType t, BlockNormal n) -> int {
+  auto blockTextureId = [&](BlockType t, BlockNormal n) -> int32_t {
     switch (t) {
     case BlockType::GRASS:
-      return 0; // grass_top (layer 0) for all faces
+      return 0;
     case BlockType::DIRT:
-      return 1; // dirt (layer 1)
+      return 1;
     default:
       return 1;
     }
   };
 
   auto addQuad = [&](const glm::ivec3 &a, const glm::ivec3 &du,
-                     const glm::ivec3 &dv, BlockNormal normalId, int texId,
+                     const glm::ivec3 &dv, BlockNormal normalId, int32_t texId,
                      bool flipV) {
-    int x = a.x;
-    int y = a.y;
-    int z = a.z;
+    int32_t x = a.x;
+    int32_t y = a.y;
+    int32_t z = a.z;
 
-    int duX = du.x, duY = du.y, duZ = du.z;
-    int dvX = dv.x, dvY = dv.y, dvZ = dv.z;
+    int32_t duX = du.x, duY = du.y, duZ = du.z;
+    int32_t dvX = dv.x, dvY = dv.y, dvZ = dv.z;
 
     size_t base = m_Data.size();
 
-    auto pushVertex = [&](int bx, int by, int bz, float uvX, float uvY) {
+    auto pushVertex = [&](int32_t bx, int32_t by, int32_t bz, float uvX,
+                          float uvY) {
       uint32_t corner = 0;
-      if (uvX > 0.0f) corner |= 1;
-      if (uvY > 0.0f) corner |= 2;
+      if (uvX > 0.0f)
+        corner |= 1;
+      if (uvY > 0.0f)
+        corner |= 2;
 
       PackedVertex v;
       v.bits = 0;
-      v.x = bx;
-      v.z = bz;
-      v.y = by;
+      v.x = static_cast<uint32_t>(bx & 0xFF);
+      v.z = static_cast<uint32_t>(bz & 0xFF);
+      v.y = static_cast<uint32_t>(by & 0xFF);
       v.normal = static_cast<uint32_t>(normalId);
-      v.texId = static_cast<uint32_t>(texId);
+      v.texId = static_cast<uint32_t>(texId & 3);
       v.corner = corner;
       m_Data.push_back(v);
     };
@@ -102,7 +158,8 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
       pushVertex(x, y, z, 0.0f, 0.0f);
       pushVertex(x + duX, y + duY, z + duZ, width, 0.0f);
       pushVertex(x + dvX, y + dvY, z + dvZ, 0.0f, height);
-      pushVertex(x + duX + dvX, y + duY + dvY, z + duZ + dvZ, width, height);
+      pushVertex(x + duX + dvX, y + duY + dvY, z + duZ + dvZ, width,
+                 height);
     } else {
       pushVertex(x, y, z, 0.0f, height);
       pushVertex(x + duX, y + duY, z + duZ, width, height);
@@ -110,52 +167,67 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
       pushVertex(x + duX + dvX, y + duY + dvY, z + duZ + dvZ, width, 0.0f);
     }
 
-    m_Indices.push_back(static_cast<uint>(base + 0));
-    m_Indices.push_back(static_cast<uint>(base + 2));
-    m_Indices.push_back(static_cast<uint>(base + 1));
-    m_Indices.push_back(static_cast<uint>(base + 1));
-    m_Indices.push_back(static_cast<uint>(base + 2));
-    m_Indices.push_back(static_cast<uint>(base + 3));
+    const uint32_t b0 = static_cast<uint32_t>(base + 0);
+    const uint32_t b1 = static_cast<uint32_t>(base + 1);
+    const uint32_t b2 = static_cast<uint32_t>(base + 2);
+    const uint32_t b3 = static_cast<uint32_t>(base + 3);
+
+    m_Indices.push_back(b0);
+    m_Indices.push_back(b2);
+    m_Indices.push_back(b1);
+    m_Indices.push_back(b1);
+    m_Indices.push_back(b2);
+    m_Indices.push_back(b3);
   };
 
-auto isBlockExposed = [&](int x, int y, int z, int dir) -> bool {
-    int nx = x, ny = y, nz = z;
+  auto isBlockExposed = [&](int32_t x, int32_t y, int32_t z, int32_t dir) -> bool {
+    int32_t nx = x, ny = y, nz = z;
     switch (dir) {
-      case 0: nx = x + 1; break;
-      case 1: nx = x - 1; break;
-      case 2: ny = y + 1; break;
-      case 3: ny = y - 1; break;
-      case 4: nz = z + 1; break;
-      case 5: nz = z - 1; break;
+    case 0:
+      nx = x + 1;
+      break;
+    case 1:
+      nx = x - 1;
+      break;
+    case 2:
+      ny = y + 1;
+      break;
+    case 3:
+      ny = y - 1;
+      break;
+    case 4:
+      nz = z + 1;
+      break;
+    case 5:
+      nz = z - 1;
+      break;
     }
 
-    if (ny < 0 || ny >= static_cast<int>(BY)) {
+    if (ny < 0 || ny >= static_cast<int32_t>(BY)) {
       return true;
     }
 
-    ushort neighborHeight;
-    if (nx < 0 || nz < 0 || nx >= static_cast<int>(BX) ||
-        nz >= static_cast<int>(BZ)) {
-      neighborHeight = getNeighborHeight(nx, nz);
-    } else {
-      neighborHeight = m_HeightMap[nx][nz];
-    }
+    const uint32_t ex = static_cast<uint32_t>(nx + 1);
+    const uint32_t ez = static_cast<uint32_t>(nz + 1);
+    const uint16_t neighborHeight = m_ExtendedHeightMap[ex][ez];
 
-    return static_cast<ushort>(ny) >= neighborHeight;
+    return static_cast<uint16_t>(ny) >= neighborHeight;
   };
 
-  for (int x = 0; x < static_cast<int>(BX); ++x) {
-    for (int z = 0; z < static_cast<int>(BZ); ++z) {
-      ushort height = m_HeightMap[x][z];
-      for (int y = height; y >= 0; --y) {
+  for (int32_t x = 0; x < BX; ++x) {
+    for (int32_t z = 0; z < BZ; ++z) {
+      uint16_t height = m_HeightMap[x][z];
+      for (int32_t y = static_cast<int32_t>(height); y >= 0; --y) {
         bool hasExposedFace = false;
 
-        for (int d = 0; d < 6; ++d) {
-          if (!isBlockExposed(x, y, z, d)) continue;
+        for (int32_t d = 0; d < 6; ++d) {
+          if (!isBlockExposed(x, y, z, d))
+            continue;
 
           hasExposedFace = true;
 
-          BlockType cur = (y == static_cast<int>(height)) ? BlockType::GRASS : BlockType::DIRT;
+          BlockType cur = (y == static_cast<int32_t>(height)) ? BlockType::GRASS
+                                                             : BlockType::DIRT;
 
           glm::ivec3 a(x, y, z);
           glm::ivec3 du(0, 0, 0), dv(0, 0, 0);
@@ -163,54 +235,69 @@ auto isBlockExposed = [&](int x, int y, int z, int dir) -> bool {
           bool flipV = false;
 
           switch (d) {
-            case 0:
-              a.x = x + 1;
-              du = {0, 1, 0};
-              dv = {0, 0, 1};
-              normalId = BlockNormal::RIGHT_LEFT_NORMAL;
-              break;
-            case 1:
-              du = {0, 1, 0};
-              dv = {0, 0, 1};
-              normalId = BlockNormal::RIGHT_LEFT_NORMAL;
-              break;
-            case 2:
-              a.y = y + 1;
-              du = {1, 0, 0};
-              dv = {0, 0, 1};
-              normalId = BlockNormal::TOP_NORMAL;
-              break;
-            case 3:
-              if (y == 0) continue;
-              du = {1, 0, 0};
-              dv = {0, 0, 1};
-              normalId = BlockNormal::BOTTOM_NORMAL;
-              break;
-            case 4:
-              a.z = z + 1;
-              du = {1, 0, 0};
-              dv = {0, 1, 0};
-              normalId = BlockNormal::FRONT_BACK_NORMAL;
-              break;
-            case 5:
-              du = {1, 0, 0};
-              dv = {0, 1, 0};
-              normalId = BlockNormal::FRONT_BACK_NORMAL;
-              flipV = true;
-              break;
+          case 0:
+            a.x = x + 1;
+            du = {0, 1, 0};
+            dv = {0, 0, 1};
+            normalId = BlockNormal::RIGHT_LEFT_NORMAL;
+            break;
+          case 1:
+            du = {0, 1, 0};
+            dv = {0, 0, 1};
+            normalId = BlockNormal::RIGHT_LEFT_NORMAL;
+            break;
+          case 2:
+            a.y = y + 1;
+            du = {1, 0, 0};
+            dv = {0, 0, 1};
+            normalId = BlockNormal::TOP_NORMAL;
+            break;
+          case 3:
+            if (y == 0)
+              continue;
+            du = {1, 0, 0};
+            dv = {0, 0, 1};
+            normalId = BlockNormal::BOTTOM_NORMAL;
+            break;
+          case 4:
+            a.z = z + 1;
+            du = {1, 0, 0};
+            dv = {0, 1, 0};
+            normalId = BlockNormal::FRONT_BACK_NORMAL;
+            break;
+          case 5:
+            du = {1, 0, 0};
+            dv = {0, 1, 0};
+            normalId = BlockNormal::FRONT_BACK_NORMAL;
+            flipV = true;
+            break;
           }
 
-          int texId = blockTextureId(cur, normalId);
+          int32_t texId = blockTextureId(cur, normalId);
           addQuad(a, du, dv, normalId, texId, flipV);
         }
 
-        if (!hasExposedFace) break;
+        if (!hasExposedFace)
+          break;
       }
     }
   }
 }
 
 void Chunk::pass() {
+  if (m_VAO != 0) {
+    glDeleteVertexArrays(1, &m_VAO);
+    m_VAO = 0;
+  }
+  if (m_VBO != 0) {
+    glDeleteBuffers(1, &m_VBO);
+    m_VBO = 0;
+  }
+  if (m_EBO != 0) {
+    glDeleteBuffers(1, &m_EBO);
+    m_EBO = 0;
+  }
+
   glGenVertexArrays(1, &m_VAO);
   glGenBuffers(1, &m_VBO);
   glGenBuffers(1, &m_EBO);
@@ -218,22 +305,25 @@ void Chunk::pass() {
   glBindVertexArray(m_VAO);
 
   glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-  glBufferData(GL_ARRAY_BUFFER, m_Data.size() * sizeof(PackedVertex), m_Data.data(),
-               GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER,
+               static_cast<GLsizeiptr>(m_Data.size() * sizeof(PackedVertex)),
+               m_Data.data(), GL_STATIC_DRAW);
 
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
-  glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_Indices.size() * sizeof(uint),
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+               static_cast<GLsizeiptr>(m_Indices.size() * sizeof(uint32_t)),
                m_Indices.data(), GL_STATIC_DRAW);
 
-  m_IndexCount = static_cast<uint>(m_Indices.size());
-  m_VboSize = m_Data.size();
+  m_IndexCount = static_cast<uint32_t>(m_Indices.size());
+  m_VboSize = static_cast<uint32_t>(m_Data.size());
 
   m_Data.clear();
   m_Indices.clear();
   m_Data.shrink_to_fit();
   m_Indices.shrink_to_fit();
 
-  glVertexAttribPointer(0, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(PackedVertex), (void *)0);
+  glVertexAttribPointer(0, 1, GL_UNSIGNED_INT, GL_FALSE, sizeof(PackedVertex),
+                        static_cast<void *>(nullptr));
   glEnableVertexAttribArray(0);
 
   if (Constants::DO_TRIANGLE_LINE) {
@@ -242,17 +332,28 @@ void Chunk::pass() {
 }
 
 void Chunk::cleanup() {
-  glDeleteBuffers(1, &m_VBO);
-  glDeleteBuffers(1, &m_EBO);
-  glDeleteVertexArrays(1, &m_VAO);
+  if (m_VBO != 0) {
+    glDeleteBuffers(1, &m_VBO);
+    m_VBO = 0;
+  }
+  if (m_EBO != 0) {
+    glDeleteBuffers(1, &m_EBO);
+    m_EBO = 0;
+  }
+  if (m_VAO != 0) {
+    glDeleteVertexArrays(1, &m_VAO);
+    m_VAO = 0;
+  }
+  m_IndexCount = 0;
+  m_VboSize = 0;
 }
 
 void Chunk::render() {
   glBindVertexArray(m_VAO);
   glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(m_IndexCount),
-                 GL_UNSIGNED_INT, 0);
+                 GL_UNSIGNED_INT, nullptr);
 }
 
-ushort Chunk::getHighestBlockY(uint blockX, uint blockZ) {
+uint16_t Chunk::getHighestBlockY(uint32_t blockX, uint32_t blockZ) {
   return m_HeightMap[blockX][blockZ];
 }

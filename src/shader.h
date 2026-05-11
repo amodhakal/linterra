@@ -1,5 +1,6 @@
 #pragma once
-#include <sys/types.h>
+
+#include <cstdint>
 
 #include <glm/glm.hpp>
 #include <string>
@@ -8,9 +9,16 @@
 class Shader {
  public:
   Shader();
+  ~Shader();
+
+  Shader(const Shader&) = delete;
+  Shader& operator=(const Shader&) = delete;
+  Shader(Shader&& other) noexcept;
+  Shader& operator=(Shader&& other) noexcept;
+
   void load(const char* vertexPath, const char* fragmentPath);
   void use();
-  uint getId();
+  [[nodiscard]] std::uint32_t getId() const;
 
   void newUniform(const char* name);
   void setUniformMat4(const char* name, const glm::mat4& values);
@@ -20,6 +28,6 @@ class Shader {
   void setUniformVec3(const char* name, glm::vec3 value);
 
  private:
-  uint m_Id;
+  std::uint32_t m_Id = 0;
   std::unordered_map<std::string, int> m_Uniforms;
 };

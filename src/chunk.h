@@ -1,8 +1,9 @@
 #pragma once
-#include <sys/types.h>
 
 #include <cstdint>
 #include <vector>
+
+#include <glad/glad.h>
 
 #include "config.h"
 
@@ -30,24 +31,38 @@ union PackedVertex {
 
 class Chunk {
 public:
-  Chunk() = default;
+  Chunk();
+
+  ~Chunk();
+
+  Chunk(const Chunk &) = delete;
+  Chunk &operator=(const Chunk &) = delete;
+  Chunk(Chunk &&other) noexcept;
+  Chunk &operator=(Chunk &&other) noexcept;
 
   void generateMeshData(const glm::vec2 &position);
 
   void pass();
   void render();
   void cleanup();
-  ushort getHighestBlockY(uint blockX, uint blockZ);
+
+  uint16_t getHighestBlockY(uint32_t blockX, uint32_t blockZ);
 
 private:
-  uint m_VAO;
-  uint m_VBO;
-  uint m_EBO;
-  uint m_VboSize;
-  uint m_IndexCount;
+  uint32_t m_VAO;
+  uint32_t m_VBO;
+  uint32_t m_EBO;
+  uint32_t m_VboSize;
+  uint32_t m_IndexCount;
 
   std::vector<PackedVertex> m_Data;
-  std::vector<uint> m_Indices;
+  std::vector<uint32_t> m_Indices;
 
-  ushort m_HeightMap[Constants::Chunk::LENGTH][Constants::Chunk::LENGTH];
+  static constexpr uint32_t kExtSide =
+      static_cast<uint32_t>(Constants::Chunk::LENGTH) + 2u;
+
+  uint16_t m_HeightMap[Constants::Chunk::LENGTH][Constants::Chunk::LENGTH];
+
+  /** Halo for neighbor lookups: local block (lx,lz) in [-1, LENGTH] maps to [(uint32_t)lx + 1]. */
+  uint16_t m_ExtendedHeightMap[kExtSide][kExtSide];
 };
