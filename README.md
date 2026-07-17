@@ -237,3 +237,30 @@ make
 ```bash
 ./linterra
 ```
+
+### Unit Tests
+
+The pure (no-GL-context) subsystems — procedural noise, camera math, and
+frustum culling — have a doctest-based unit suite in `tests/`. The test
+executable is built alongside the game and requires only GLM (no OpenGL/GLFW
+runtime), so it can run in headless CI.
+
+```bash
+# configure + build everything (tests are ON by default)
+mkdir build && cd build
+cmake ..
+make
+
+# run the suite directly, or via ctest
+./linterra_tests
+ctest --output-on-failure
+```
+
+To omit the test target (e.g. when only building the game):
+
+```bash
+cmake -DBUILD_TESTS=OFF ..
+```
+
+The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
+— no extra dependency to fetch.

@@ -1,7 +1,13 @@
 #pragma once
+
+// GLAD/GLFW are only required by code that touches OpenGL directly. Guard them
+// so pure subsystems (noise, camera math, frustum) can be compiled and tested
+// without pulling in GL headers (e.g. the unit-test target).
+#if !defined(LINTERRA_NO_OPENGL)
 #define GL_SILENCE_DEPRECATION
 #include <glad/glad.h>
 #include <glfw/glfw3.h>
+#endif
 
 #include <cstdint>
 #include <glm/glm.hpp>

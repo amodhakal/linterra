@@ -42,5 +42,5 @@ glm::mat4 Camera::getProjection() {
 }
 
 glm::vec3 Camera::getRight() const {
-  return glm::normalize(glm::cross(m_Up, m_WorldUp));
+  return glm::normalize(glm::cross(m_Front, m_Up));
 }

@@ -52,3 +52,45 @@ add_custom_command(
     "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
     "$<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders"
 )
+
+# ---------------------------------------------------------------------------
+# Unit tests (doctest)
+#
+# Covers the pure (no-GL-context) subsystems: procedural noise, camera math,
+# and frustum culling. These are the math-heavy, regression-prone parts. The
+# test executable links only the sources it needs, so no OpenGL/GLFW runtime
+# is required to build or run it.
+# ---------------------------------------------------------------------------
+option(BUILD_TESTS "Build the unit test suite" ON)
+
+if(BUILD_TESTS)
+  add_executable(linterra_tests
+    tests/test_main.cpp
+    tests/test_noise.cpp
+    tests/test_camera.cpp
+    tests/test_frustum.cpp
+    vendor/noise/src/noise.cpp
+    src/camera.cpp
+    src/frustum.cpp
+  )
+
+  target_include_directories(linterra_tests PRIVATE
+    tests
+    vendor/doctest/include
+    src
+    vendor/noise/include
+  )
+
+  target_compile_definitions(linterra_tests PRIVATE LINTERRA_NO_OPENGL)
+
+  set_target_properties(linterra_tests PROPERTIES
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+  )
+
+  target_link_libraries(linterra_tests PRIVATE glm::glm)
+
+  enable_testing()
+  add_test(NAME linterra_tests COMMAND linterra_tests)
+endif()

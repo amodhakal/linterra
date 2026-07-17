@@ -10,7 +10,7 @@
 
 #include "chunk.h"
 #include "config.h"
-#include "frustum.h"
+#include "Frustum.h"
 #include "renderer/renderer.hpp"
 
 namespace {
