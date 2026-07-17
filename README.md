@@ -46,6 +46,33 @@ This milestone introduced a renderer abstraction layer to decouple the engine fr
 - To add Vulkan support: create `src/renderer/vulkan/` with implementations of the interface classes.
 - Switching backends requires only changing the CMake option—no code changes needed in `Shader`, `Texture`, `Chunk`, `ChunkManager`, or `Application`.
 
+### Milestone 7 — Unit Testing & CI
+
+This milestone added a regression safety net so math-heavy subsystems can be validated automatically on every push, rather than verified by eye.
+
+**Test Framework**
+
+- Vendored [doctest](https://github.com/doctest/doctest) (single-header) at `vendor/doctest/include/doctest/doctest.h` — no external fetch step, matching the project's vendor-everything approach.
+- New `linterra_tests` CMake target (gated by `BUILD_TESTS`, ON by default) compiles only the pure, no-GL-context subsystems: procedural `Noise`, `Camera` math, and `Frustum` culling.
+
+**Test Coverage**
+
+- `Noise`: fbm determinism, bounded `[-1,1]` output, continuity, seed round-trip/isolation.
+- `Camera`: constructor placement, finite view/projection matrices, and a regression guard for the right-vector.
+- `Frustum`: near-chunk inclusion, far-plane culling, side-plane culling, determinism.
+- 13 test cases / 553 assertions, all passing.
+
+**Decoupling & Bug Fixes Surfaced**
+
+- `config.h` now guards GLAD/GLFW behind a `LINTERRA_NO_OPENGL` macro so pure math compiles without GL headers.
+- Tests caught and fixed a real bug: `Camera::getRight()` computed `cross(m_Up, m_WorldUp)` (zero vector → NaN via `normalize`), silently corrupting frustum side-plane culling. Now uses `cross(m_Front, m_Up)`.
+- Fixed case-sensitive includes (`"frustum.h"` → `"Frustum.h"`) in `frustum.cpp`/`manager.cpp` that warned on macOS and would break the build on Linux/Windows.
+
+**Continuous Integration**
+
+- Added `.github/workflows/ci.yml`: on every push and PR, Ubuntu + clang installs deps, configures with `BUILD_TESTS=ON`, builds `linterra_tests`, and runs `ctest --output-on-failure`.
+- `ctest` exits non-zero on any failure, so a red test fails the job and blocks the merge on protected branches.
+
 ### Milestone 5 — Chunk Pipeline Throughput, Thread Safety, and RAII Cleanup
 
 This milestone focused on reducing chunk-generation stalls, removing key thread-safety hazards, and tightening resource lifetime management across the render pipeline.
