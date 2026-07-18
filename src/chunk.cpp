@@ -285,6 +285,25 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
       }
     }
   }
+
+  // --- Water surface --------------------------------------------------------
+  // Columns whose terrain surface sits below WATER_LEVEL get a flat opaque water
+  // top face at WATER_LEVEL, textured with the WATER (blue) array layer. It is
+  // added to the SAME mesh as the terrain, so it is drawn by the scene shader
+  // with no custom program. Submerged faces are omitted (hidden by the opaque
+  // surface above) to keep the mesh thin.
+  for (int32_t x = 0; x < BX; ++x) {
+    for (int32_t z = 0; z < BZ; ++z) {
+      const uint16_t surface = m_HeightMap[x][z];
+      if (surface >= Constants::Chunk::WATER_LEVEL) {
+        continue;  // terrain already at/above the water line: no water here
+      }
+      const int32_t topY = Constants::Chunk::WATER_LEVEL;
+      glm::ivec3 a(x, topY, z);
+      addQuad(a, {1, 0, 0}, {0, 0, 1}, BlockNormal::TOP_NORMAL,
+              static_cast<int32_t>(BlockType::WATER), false);
+    }
+  }
 }
 
 void Chunk::pass() {

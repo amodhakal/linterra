@@ -35,6 +35,11 @@ struct TaskResult {
     return *this;
   }
 
+  // Upload the chunk's mesh to the GPU.
+  void pass() {
+    chunk.pass();
+  }
+
   TaskResult(const TaskResult &) = delete;
   TaskResult &operator=(const TaskResult &) = delete;
 };

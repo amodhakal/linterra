@@ -66,6 +66,9 @@ constexpr float FOG_START = static_cast<float>(RENDER_DISTANCE_BLOCKS) / 2.0f;
 constexpr float FOG_END = static_cast<float>(RENDER_DISTANCE_BLOCKS);
 constexpr std::int32_t MAX_BLOCK_HEIGHT =
     static_cast<std::int32_t>(HEIGHT / 1.5);
+// Columns are filled with opaque WATER blocks from WATER_LEVEL down to the
+// solid terrain surface, so lakes/pools read as flat water at this height.
+constexpr std::int32_t WATER_LEVEL = 45;
 constexpr std::int32_t MAX_GENERATION_THREADS = 100;
 }  // namespace Chunk
 

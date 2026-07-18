@@ -132,8 +132,11 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
         glm::vec3(static_cast<float>(position.s * Constants::Chunk::LENGTH),
                   0.0f,
                   static_cast<float>(position.t * Constants::Chunk::LENGTH)));
-    shader.setUniformMat4("uModel", model);
 
+    // Terrain pass: scene shader draws both the terrain and the (blue)
+    // water surface, which is folded into the same mesh.
+    shader.use();
+    shader.setUniformMat4("uModel", model);
     chunk.render();
   }
 }

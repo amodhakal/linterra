@@ -12,7 +12,7 @@ class IRenderer;
 class IBuffer;
 class IVertexArray;
 
-enum BlockType : uint8_t { AIR = 0, GRASS = 1, DIRT = 2 };
+enum BlockType : uint8_t { AIR = 0, GRASS = 1, DIRT = 2, WATER = 3 };
 
 enum BlockNormal : uint8_t {
   RIGHT_LEFT_NORMAL = 0,
