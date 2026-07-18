@@ -6,7 +6,9 @@ out vec3 fragColor;
 flat out int fragNormal;
 out vec3 fragPosition;
 out vec3 fragTexData;
-out float fragDepth;
+// View-space distance from camera, packed into alpha so the separate fog
+// post-process pass can reconstruct it without a depth-texture attachment.
+out float fragViewDepth;
 
 uniform mat4 uModel;
 uniform mat4 uView;
@@ -27,9 +29,10 @@ void main() {
     vec2 uv = vec2(isU ? 1.0 : 0.0, isV ? 1.0 : 0.0);
     vec3 texData = vec3(float(texId), uv.x, uv.y);
 
-    gl_Position = uProjection * uView * uModel * vec4(position, 1.0);
+    vec4 clip = uProjection * uView * uModel * vec4(position, 1.0);
+    gl_Position = clip;
     fragPosition = position;
     fragTexData = texData;
     fragNormal = normal;
-    fragDepth = gl_Position.w;
+    fragViewDepth = clip.w;
 }

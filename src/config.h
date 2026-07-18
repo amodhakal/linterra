@@ -18,6 +18,10 @@ using uint = std::uint32_t;
 namespace Constants {
 constexpr auto VERTEX_PATH = "./shaders/shaders.vert";
 constexpr auto FRAGMENT_PATH = "./shaders/shaders.frag";
+constexpr auto RENDER_VERTEX_PATH = "./shaders/render.vert";
+constexpr auto RENDER_FRAGMENT_PATH = "./shaders/render.frag";
+constexpr auto FOG_VERTEX_PATH = "./shaders/fog.vert";
+constexpr auto FOG_FRAGMENT_PATH = "./shaders/fog.frag";
 
 constexpr std::uint32_t SCR_WIDTH = 800;
 constexpr std::uint32_t SCR_HEIGHT = 600;

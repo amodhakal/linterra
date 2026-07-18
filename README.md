@@ -8,6 +8,23 @@ Linterra is a from-scratch, Minecraft-style voxel engine written in modern C++ a
 
 ## Implemented Features
 
+### Milestone 8 — Split Fog into a Post-Process Pass
+
+This milestone decoupled fog from the scene's fragment shader by moving it into a dedicated post-process stage, so general rendering and atmospheric effects are now independent subsystems.
+
+**Offscreen Render Target**
+
+- Added `Framebuffer` (`src/framebuffer.h` / `src/framebuffer.cpp`): owns an FBO with an RGBA color texture and a depth renderbuffer, resized on window changes. The scene's view-space distance is carried in the color alpha channel so the fog pass can reconstruct it without a depth-texture attachment.
+
+**Two-Stage Render Pipeline**
+
+- Scene pass (`render.vert` / `render.frag`): samples the texture atlas, applies directional face lighting, and writes shaded color + view distance — no fog math.
+- Fog pass (`fog.vert` / `fog.frag`): a single attribute-less fullscreen triangle composites exponential fog over the offscreen scene using `uFogStart` / `uFogEnd` / `uFogColor`.
+- `Application::update()` now renders the world into the framebuffer, then binds it as a sampler for the fog shader onto the default framebuffer. Window resize forwards to `Framebuffer::resize`.
+
+**Shader Reorganization**
+
+- Replaced the combined `shaders.vert` / `shaders.frag` with four focused files under `shaders/`: `render.vert`, `render.frag`, `fog.vert`, `fog.frag`. Paths live in `Constants` (`RENDER_VERTEX_PATH`, etc.).
 
 ### Milestone 7 — Unit Testing & CI
 

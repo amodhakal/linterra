@@ -1,19 +1,21 @@
 #version 330 core
 
+// Scene pass: samples the texture atlas and applies directional face lighting.
+// No fog here — that is handled by the separate fog post-process pass. The
+// view-space distance is carried in the output alpha channel for the fog pass.
+
 const int RIGHT_LEFT_NORMAL = 0;
 const int FRONT_BACK_NORMAL = 1;
 const int BOTTOM_NORMAL = 2;
 const int TOP_NORMAL = 3;
 
 uniform sampler2DArray uTextureArray;
-uniform float uFogStart;
 uniform float uFogEnd;
-uniform vec3 uFogColor;
 
 flat in int fragNormal;
 in vec3 fragPosition;
 in vec3 fragTexData; // x = texId, y = u, z = v
-in float fragDepth;
+in float fragViewDepth;
 
 out vec4 outColor;
 
@@ -34,8 +36,6 @@ void main() {
         light = 0.7;
     }
 
-    outColor = texColor * light;
-
-    float fogFactor = clamp((fragDepth - uFogStart) / (uFogEnd - uFogStart), 0.0, 1.0);
-    outColor = mix(outColor, vec4(uFogColor, 1.0), fogFactor);
+    vec3 shaded = texColor.rgb * light;
+    outColor = vec4(shaded, clamp(fragViewDepth / uFogEnd, 0.0, 1.0));
 }
