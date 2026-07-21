@@ -66,6 +66,16 @@ enum class RenderBackend : uint8_t {
   Vulkan = 2
 };
 
+enum class Key : uint8_t {
+  Escape = 0,
+  W = 1,
+  A = 2,
+  S = 3,
+  D = 4,
+  Space = 5,
+  LeftShift = 6
+};
+
 class IBuffer {
  public:
   virtual ~IBuffer() = default;
@@ -116,6 +126,10 @@ class IRenderer {
  public:
   virtual ~IRenderer() = default;
 
+  using CursorPosCallback = void (*)(void*, double, double);
+  using ScrollCallback = void (*)(void*, double, double);
+  using FramebufferSizeCallback = void (*)(void*, int, int);
+
   virtual void clear(const glm::vec4& clearColor) = 0;
   virtual void setViewport(int x, int y, int width, int height) = 0;
   virtual void enable(Feature feature) = 0;
@@ -149,6 +163,33 @@ class IRenderer {
   virtual void bindVertexArray(IVertexArray& va) = 0;
 
   virtual void activeTexture(int unit) = 0;
+
+  virtual void initializeWindowing() = 0;
+  virtual void terminateWindowing() = 0;
+  virtual void configureWindowHints() = 0;
+  virtual bool createWindow(int width, int height, const char* title) = 0;
+  virtual void makeContextCurrent() = 0;
+  virtual void setCursorDisabled() = 0;
+  virtual void setEventContext(void* pointer) = 0;
+  virtual void setCursorPosCallback(CursorPosCallback callback) = 0;
+  virtual void setScrollCallback(ScrollCallback callback) = 0;
+  virtual void setFramebufferSizeCallback(FramebufferSizeCallback callback) = 0;
+  virtual bool loadContextFunctions() = 0;
+  virtual void getFramebufferSize(int* width, int* height) = 0;
+  virtual bool windowShouldClose() = 0;
+  virtual void swapBuffers() = 0;
+  virtual void pollEvents() = 0;
+  virtual float getTimeSeconds() = 0;
+  virtual bool isKeyPressed(Key key) = 0;
+  virtual void setWindowShouldClose(bool shouldClose) = 0;
+
+  virtual void bindFramebuffer(std::uint32_t framebufferId) = 0;
+  virtual std::uint32_t getLastError() = 0;
+  virtual void bindTexture2D(std::uint32_t textureId, std::int32_t unit) = 0;
+  virtual void resizeOffscreenTarget(std::uint32_t width,
+                                     std::uint32_t height) = 0;
+  virtual void bindOffscreenTarget() = 0;
+  virtual void bindOffscreenColorTexture(std::int32_t unit) = 0;
 };
 
 std::unique_ptr<IRenderer> createRenderer(RenderBackend backend);

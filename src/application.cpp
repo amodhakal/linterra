@@ -26,28 +26,22 @@ Application::Application(const char* title, const uint width, const uint height,
       m_lastFrame(0)
 
 {
-  glfwInit();
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-  glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  m_Renderer->initializeWindowing();
+  m_Renderer->configureWindowHints();
 
-#if defined(__APPLE__)
-  glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-#endif
-
-  m_Window = glfwCreateWindow(width, height, title, nullptr, nullptr);
-  if (!m_Window) {
+  if (!m_Renderer->createWindow(static_cast<int>(width), static_cast<int>(height),
+                                title)) {
     throw std::runtime_error("Failed to create window");
   }
 
-  glfwMakeContextCurrent(m_Window);
-  glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-  glfwSetCursorPosCallback(m_Window, handleMouseCallback);
-  glfwSetScrollCallback(m_Window, handleScrollCallback);
-  glfwSetFramebufferSizeCallback(m_Window, handleResizeCallback);
-  glfwSetWindowUserPointer(m_Window, this);
+  m_Renderer->makeContextCurrent();
+  m_Renderer->setCursorDisabled();
+  m_Renderer->setEventContext(this);
+  m_Renderer->setCursorPosCallback(handleMouseCallback);
+  m_Renderer->setScrollCallback(handleScrollCallback);
+  m_Renderer->setFramebufferSizeCallback(handleResizeCallback);
 
-  if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+  if (!m_Renderer->loadContextFunctions()) {
     throw std::runtime_error("Failed to initialize GLAD");
   }
 
@@ -97,18 +91,18 @@ Application::Application(const char* title, const uint width, const uint height,
 
   // Allocate the offscreen target at the current (drawing-buffer) size.
   int fbWidth = 0, fbHeight = 0;
-  glfwGetFramebufferSize(m_Window, &fbWidth, &fbHeight);
+  m_Renderer->getFramebufferSize(&fbWidth, &fbHeight);
   m_FrameWidth = static_cast<std::uint32_t>(fbWidth);
   m_FrameHeight = static_cast<std::uint32_t>(fbHeight);
-  m_Framebuffer.resize(m_FrameWidth, m_FrameHeight);
+  m_Renderer->resizeOffscreenTarget(m_FrameWidth, m_FrameHeight);
 }
 
 Application::~Application() {
-  glfwTerminate();
+  m_Renderer->terminateWindowing();
 }
 
 bool Application::isRunning() {
-  return !glfwWindowShouldClose(m_Window);
+  return !m_Renderer->windowShouldClose();
 }
 
 void Application::update() {
@@ -119,9 +113,9 @@ void Application::update() {
   glm::mat4 projection = m_Player.getProjection();
 
   // --- Pass 1: render the scene into the offscreen framebuffer ---
-  m_Framebuffer.bind();
-  m_Renderer->setViewport(0, 0, static_cast<int>(m_Framebuffer.getWidth()),
-                          static_cast<int>(m_Framebuffer.getHeight()));
+  m_Renderer->bindOffscreenTarget();
+  m_Renderer->setViewport(0, 0, static_cast<int>(m_FrameWidth),
+                          static_cast<int>(m_FrameHeight));
   m_Renderer->clear(m_BgColor);
 
   m_RenderShader.use();
@@ -132,21 +126,21 @@ void Application::update() {
   m_ChunkManager.render(cameraPtr, m_RenderShader);
 
   // --- Pass 2: fog post-process onto the default framebuffer ---
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  m_Renderer->bindFramebuffer(0);
   m_Renderer->setViewport(0, 0, static_cast<int>(m_FrameWidth),
                           static_cast<int>(m_FrameHeight));
   m_Renderer->clear(m_BgColor);
 
-  m_Framebuffer.bindColorTexture(0);
+  m_Renderer->bindOffscreenColorTexture(0);
   m_FogShader.use();
   m_Renderer->bindVertexArray(*m_FullscreenVao);
   m_Renderer->draw(PrimitiveType::Triangles, 3, 0);  // fullscreen triangle
 
-  glfwSwapBuffers(m_Window);
-  glfwPollEvents();
+  m_Renderer->swapBuffers();
+  m_Renderer->pollEvents();
 
-  GLenum err = glGetError();
-  if (err != GL_NO_ERROR) {
+  std::uint32_t err = m_Renderer->getLastError();
+  if (err != 0) {
     std::println("OpenGL Error: {}", err);
   }
 
@@ -156,7 +150,7 @@ void Application::update() {
 }
 
 float Application::getDeltaTime() {
-  float currentFrame = glfwGetTime();
+  float currentFrame = m_Renderer->getTimeSeconds();
   float deltaTime = currentFrame - m_lastFrame;
   m_lastFrame = currentFrame;
 
@@ -182,32 +176,31 @@ void Application::processScrollInput([[maybe_unused]] double xOffset,
                                    [[maybe_unused]] double yOffset) {}
 
 void Application::handleKeyPress(float deltaTime) {
-  if (glfwGetKey(m_Window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
-    glfwSetWindowShouldClose(m_Window, true);
+  if (m_Renderer->isKeyPressed(Key::Escape)) {
+    m_Renderer->setWindowShouldClose(true);
     return;
   }
 
-  m_Player.processKeyInput(m_Window, deltaTime);
+  m_Player.processKeyInput(*m_Renderer, deltaTime);
 }
 
-void Application::handleResizeCallback(GLFWwindow* window, int width,
-                                       int height) {
-  auto* context = static_cast<Application*>(glfwGetWindowUserPointer(window));
-  glViewport(0, 0, width, height);
-  context->m_FrameWidth = static_cast<std::uint32_t>(width);
-  context->m_FrameHeight = static_cast<std::uint32_t>(height);
-  context->m_Framebuffer.resize(static_cast<uint>(width),
-                                static_cast<uint>(height));
+void Application::handleResizeCallback(void* context, int width, int height) {
+  auto* application = static_cast<Application*>(context);
+  application->m_Renderer->setViewport(0, 0, width, height);
+  application->m_FrameWidth = static_cast<std::uint32_t>(width);
+  application->m_FrameHeight = static_cast<std::uint32_t>(height);
+  application->m_Renderer->resizeOffscreenTarget(
+      static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
 }
 
-void Application::handleMouseCallback(GLFWwindow* window, double xPosition,
+void Application::handleMouseCallback(void* context, double xPosition,
                                       double yPosition) {
-  auto* context = static_cast<Application*>(glfwGetWindowUserPointer(window));
-  context->processMouseInput(xPosition, yPosition);
+  auto* application = static_cast<Application*>(context);
+  application->processMouseInput(xPosition, yPosition);
 }
 
-void Application::handleScrollCallback(GLFWwindow* window, double xOffset,
+void Application::handleScrollCallback(void* context, double xOffset,
                                       double yOffset) {
-  auto* context = static_cast<Application*>(glfwGetWindowUserPointer(window));
-  context->processScrollInput(xOffset, yOffset);
+  auto* application = static_cast<Application*>(context);
+  application->processScrollInput(xOffset, yOffset);
 }

@@ -4,9 +4,9 @@
 #include <print>
 
 #include "config.h"
-#include "framebuffer.h"
 #include "manager.h"
 #include "player.h"
+#include "renderer/renderer_fwd.hpp"
 #include "shader.h"
 #include "texture.h"
 
@@ -23,11 +23,9 @@ class Application {
   void update();
 
  private:
-  GLFWwindow* m_Window;
   std::unique_ptr<IRenderer> m_Renderer;
   Shader m_RenderShader;   // scene pass: textures + lighting, no fog
   Shader m_FogShader;      // post pass: composites fog over the scene
-  Framebuffer m_Framebuffer;
   std::unique_ptr<IVertexArray> m_FullscreenVao;  // empty VAO for the fog pass
   ChunkManager m_ChunkManager;
   Player m_Player;
@@ -46,9 +44,9 @@ class Application {
   void processScrollInput(double xOffset, double yOffset);
 
   void handleKeyPress(float deltaTime);
-  static void handleResizeCallback(GLFWwindow* window, int width, int height);
-  static void handleMouseCallback(GLFWwindow* window, double xPosition,
+  static void handleResizeCallback(void* context, int width, int height);
+  static void handleMouseCallback(void* context, double xPosition,
                                   double yPosition);
-  static void handleScrollCallback(GLFWwindow* window, double xOffset,
+  static void handleScrollCallback(void* context, double xOffset,
                                    double yOffset);
 };

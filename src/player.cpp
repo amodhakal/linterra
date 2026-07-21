@@ -3,8 +3,7 @@
 #include "player.h"
 
 #include <cmath>
-
-#include <glfw/glfw3.h>
+#include "renderer/renderer.hpp"
 
 Player::Player(const glm::vec3& position)
     : m_Camera(position), m_Velocity(0.0f, 0.0f, 0.0f), m_AllowJumping(false) {}
@@ -49,30 +48,30 @@ glm::mat4 Player::getProjection() {
   return m_Camera.getProjection();
 }
 
-void Player::processKeyInput(GLFWwindow* window, float deltaTime) {
+void Player::processKeyInput(IRenderer& renderer, float deltaTime) {
   float cameraSpeed = Constants::Camera::SPEED * deltaTime;
   float previousY = m_Camera.m_Position.y;
 
-  if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+  if (renderer.isKeyPressed(Key::W)) {
     m_Camera.m_Position += cameraSpeed * m_Camera.m_Front;
   }
-  if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+  if (renderer.isKeyPressed(Key::S)) {
     m_Camera.m_Position -= cameraSpeed * m_Camera.m_Front;
   }
-  if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+  if (renderer.isKeyPressed(Key::A)) {
     m_Camera.m_Position -=
         glm::normalize(glm::cross(m_Camera.m_Front, m_Camera.m_Up)) *
         cameraSpeed;
   }
-  if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+  if (renderer.isKeyPressed(Key::D)) {
     m_Camera.m_Position +=
         glm::normalize(glm::cross(m_Camera.m_Front, m_Camera.m_Up)) *
         cameraSpeed;
   }
-  if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+  if (renderer.isKeyPressed(Key::Space)) {
     jump(cameraSpeed);
   }
-  if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+  if (renderer.isKeyPressed(Key::LeftShift)) {
     if (!Constants::DO_GRAVITY) {
       m_Camera.m_Position[1] -= cameraSpeed;
     }

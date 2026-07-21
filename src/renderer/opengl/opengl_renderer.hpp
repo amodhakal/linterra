@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glad/glad.h>
+#include <glfw/glfw3.h>
 
 #include "../renderer.hpp"
 
@@ -51,10 +52,55 @@ class OpenGLRenderer : public IRenderer {
 
   void activeTexture(int unit) override;
 
+  void initializeWindowing() override;
+  void terminateWindowing() override;
+  void configureWindowHints() override;
+  bool createWindow(int width, int height, const char* title) override;
+  void makeContextCurrent() override;
+  void setCursorDisabled() override;
+  void setEventContext(void* pointer) override;
+  void setCursorPosCallback(CursorPosCallback callback) override;
+  void setScrollCallback(ScrollCallback callback) override;
+  void setFramebufferSizeCallback(FramebufferSizeCallback callback) override;
+  bool loadContextFunctions() override;
+  void getFramebufferSize(int* width, int* height) override;
+  bool windowShouldClose() override;
+  void swapBuffers() override;
+  void pollEvents() override;
+  float getTimeSeconds() override;
+  bool isKeyPressed(Key key) override;
+  void setWindowShouldClose(bool shouldClose) override;
+
+  void bindFramebuffer(std::uint32_t framebufferId) override;
+  std::uint32_t getLastError() override;
+  void bindTexture2D(std::uint32_t textureId, std::int32_t unit) override;
+  void resizeOffscreenTarget(std::uint32_t width, std::uint32_t height) override;
+  void bindOffscreenTarget() override;
+  void bindOffscreenColorTexture(std::int32_t unit) override;
+
  private:
+  void destroyOffscreenTarget();
+  static int convertKey(Key key);
+  static void dispatchCursorPosCallback(GLFWwindow* window, double x, double y);
+  static void dispatchScrollCallback(GLFWwindow* window, double x, double y);
+  static void dispatchFramebufferSizeCallback(GLFWwindow* window, int width,
+                                              int height);
+
   static GLenum convertBufferUsage(BufferUsage usage);
   static GLenum convertDataType(DataType type);
   static GLenum convertIndexType(IndexType type);
   static GLenum convertPrimitiveType(PrimitiveType type);
   static GLenum convertFeature(Feature feature);
+
+  GLFWwindow* m_Window = nullptr;
+  void* m_EventContext = nullptr;
+  CursorPosCallback m_CursorPosCallback = nullptr;
+  ScrollCallback m_ScrollCallback = nullptr;
+  FramebufferSizeCallback m_FramebufferSizeCallback = nullptr;
+
+  std::uint32_t m_OffscreenFbo = 0;
+  std::uint32_t m_OffscreenColorTexture = 0;
+  std::uint32_t m_OffscreenDepthRbo = 0;
+  std::uint32_t m_OffscreenWidth = 0;
+  std::uint32_t m_OffscreenHeight = 0;
 };

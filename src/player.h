@@ -5,8 +5,7 @@
 #include <glm/glm.hpp>
 
 #include "camera.h"
-
-struct GLFWwindow;
+#include "renderer/renderer_fwd.hpp"
 
 class Player {
  public:
@@ -19,7 +18,7 @@ class Player {
   glm::mat4 getView();
   glm::mat4 getProjection();
 
-  void processKeyInput(GLFWwindow* window, float deltaTime);
+  void processKeyInput(IRenderer& renderer, float deltaTime);
   void processMouseInput(double xPosition, double yPosition);
 
  private:
