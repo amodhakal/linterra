@@ -42,6 +42,8 @@ class OpenGLShaderProgram : public IShaderProgram {
   void setUniform1i(int location, int value) override;
   void setUniform1iv(int location, int count, const int* values) override;
   void setUniform1f(int location, float value) override;
+  void setUniform1ui(int location, uint32_t value) override;
+  void setUniform2f(int location, float x, float y) override;
   void setUniform3f(int location, float x, float y, float z) override;
   uint32_t getId() const override { return m_Id; }
 

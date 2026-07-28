@@ -21,7 +21,8 @@ constexpr float kChunkCenterOffset = kChunkBlockExtent * 0.5f;
 
 } // namespace
 
-ChunkManager::ChunkManager(IRenderer* renderer) : m_Renderer(renderer) {}
+ChunkManager::ChunkManager(IRenderer* renderer)
+    : m_Renderer(renderer), m_ComputeShader(renderer) {}
 
 float ChunkManager::getChunkDistanceSquared(const glm::vec2 &chunkPos,
                                             const glm::vec3 &cameraPos) {

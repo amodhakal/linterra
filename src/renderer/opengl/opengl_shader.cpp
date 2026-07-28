@@ -13,7 +13,7 @@ GLenum shaderTypeToGL(ShaderType type) {
     case ShaderType::Fragment:
       return GL_FRAGMENT_SHADER;
     case ShaderType::Compute:
-      return GL_VERTEX_SHADER;
+      return GL_COMPUTE_SHADER;
   }
   return GL_VERTEX_SHADER;
 }
@@ -140,6 +140,14 @@ void OpenGLShaderProgram::setUniform1iv(int location, int count,
 
 void OpenGLShaderProgram::setUniform1f(int location, float value) {
   glUniform1f(location, value);
+}
+
+void OpenGLShaderProgram::setUniform1ui(int location, uint32_t value) {
+  glUniform1ui(location, value);
+}
+
+void OpenGLShaderProgram::setUniform2f(int location, float x, float y) {
+  glUniform2f(location, x, y);
 }
 
 void OpenGLShaderProgram::setUniform3f(int location, float x, float y, float z) {

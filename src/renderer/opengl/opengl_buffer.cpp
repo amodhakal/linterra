@@ -32,12 +32,14 @@ OpenGLBuffer& OpenGLBuffer::operator=(OpenGLBuffer&& other) noexcept {
 
 void OpenGLBuffer::bind() {
   GLenum target = (m_Type == BufferType::Index) ? GL_ELEMENT_ARRAY_BUFFER
-                                                : GL_ARRAY_BUFFER;
+                : (m_Type == BufferType::Storage) ? GL_SHADER_STORAGE_BUFFER
+                : GL_ARRAY_BUFFER;
   glBindBuffer(target, m_Id);
 }
 
 void OpenGLBuffer::unbind() {
   GLenum target = (m_Type == BufferType::Index) ? GL_ELEMENT_ARRAY_BUFFER
-                                                : GL_ARRAY_BUFFER;
+                : (m_Type == BufferType::Storage) ? GL_SHADER_STORAGE_BUFFER
+                : GL_ARRAY_BUFFER;
   glBindBuffer(target, 0);
 }

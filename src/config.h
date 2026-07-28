@@ -22,6 +22,7 @@ constexpr auto RENDER_VERTEX_PATH = "./shaders/render.vert";
 constexpr auto RENDER_FRAGMENT_PATH = "./shaders/render.frag";
 constexpr auto FOG_VERTEX_PATH = "./shaders/fog.vert";
 constexpr auto FOG_FRAGMENT_PATH = "./shaders/fog.frag";
+constexpr auto TERRAIN_COMPUTE_PATH = "./shaders/terrain.comp";
 
 constexpr std::uint32_t SCR_WIDTH = 800;
 constexpr std::uint32_t SCR_HEIGHT = 600;

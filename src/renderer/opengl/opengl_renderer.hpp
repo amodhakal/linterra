@@ -27,6 +27,9 @@ class OpenGLRenderer : public IRenderer {
   std::unique_ptr<IBuffer> createBuffer(BufferType type) override;
   void setBufferData(IBuffer& buffer, const void* data, size_t size,
                      BufferUsage usage) override;
+  void bindBufferBase(IBuffer& buffer, uint32_t bindingPoint) override;
+  void getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) override;
+  void dispatchCompute(uint32_t numGroupsX, uint32_t numGroupsY, uint32_t numGroupsZ) override;
 
   std::unique_ptr<IVertexArray> createVertexArray() override;
   void setVertexAttribute(IVertexArray& va, uint32_t index, int size,

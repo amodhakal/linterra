@@ -43,9 +43,39 @@ void OpenGLRenderer::setBufferData(IBuffer& buffer, const void* data,
   auto& glBuffer = dynamic_cast<OpenGLBuffer&>(buffer);
   GLenum target = (glBuffer.getType() == BufferType::Index) 
                   ? GL_ELEMENT_ARRAY_BUFFER 
+                  : (glBuffer.getType() == BufferType::Storage)
+                  ? GL_SHADER_STORAGE_BUFFER
                   : GL_ARRAY_BUFFER;
   glBufferData(target, static_cast<GLsizeiptr>(size), data,
                convertBufferUsage(usage));
+}
+
+void OpenGLRenderer::bindBufferBase(IBuffer& buffer, uint32_t bindingPoint) {
+  buffer.bind();
+  auto& glBuffer = dynamic_cast<OpenGLBuffer&>(buffer);
+  GLenum target = (glBuffer.getType() == BufferType::Index) 
+                  ? GL_ELEMENT_ARRAY_BUFFER 
+                  : (glBuffer.getType() == BufferType::Storage)
+                  ? GL_SHADER_STORAGE_BUFFER
+                  : GL_ARRAY_BUFFER;
+  glBindBufferBase(target, bindingPoint, buffer.getId());
+}
+
+void OpenGLRenderer::getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) {
+  buffer.bind();
+  auto& glBuffer = dynamic_cast<OpenGLBuffer&>(buffer);
+  GLenum target = (glBuffer.getType() == BufferType::Index) 
+                  ? GL_ELEMENT_ARRAY_BUFFER 
+                  : (glBuffer.getType() == BufferType::Storage)
+                  ? GL_SHADER_STORAGE_BUFFER
+                  : GL_ARRAY_BUFFER;
+  glGetBufferSubData(target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(size), data);
+  buffer.unbind();
+}
+
+void OpenGLRenderer::dispatchCompute(uint32_t numGroupsX, uint32_t numGroupsY, uint32_t numGroupsZ) {
+  glDispatchCompute(numGroupsX, numGroupsY, numGroupsZ);
+  glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
 }
 
 std::unique_ptr<IVertexArray> OpenGLRenderer::createVertexArray() {
