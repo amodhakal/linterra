@@ -114,10 +114,11 @@ void Chunk::generateHeightMapGPU(const glm::vec2 &position,
 }
 
 void Chunk::generateMeshData(const glm::vec2 &position) {
-  const int32_t BX = Constants::Chunk::LENGTH;
-  const size_t BY = static_cast<size_t>(Constants::Chunk::HEIGHT);
-  const int32_t BZ = Constants::Chunk::LENGTH;
+  generateHeightMapCPU(position);
+  generateMesh();
+}
 
+void Chunk::generateHeightMapCPU(const glm::vec2 &position) {
   const float baseX = position.s * static_cast<float>(Constants::Chunk::LENGTH);
   const float baseZ = position.t * static_cast<float>(Constants::Chunk::LENGTH);
 
@@ -145,12 +146,18 @@ void Chunk::generateMeshData(const glm::vec2 &position) {
     }
   }
 
-  for (int32_t x = 0; x < BX; ++x) {
-    for (int32_t z = 0; z < BZ; ++z) {
+  for (int32_t x = 0; x < Constants::Chunk::LENGTH; ++x) {
+    for (int32_t z = 0; z < Constants::Chunk::LENGTH; ++z) {
       m_HeightMap[x][z] = m_ExtendedHeightMap[static_cast<uint32_t>(x + 1)]
                                          [static_cast<uint32_t>(z + 1)];
     }
   }
+}
+
+void Chunk::generateMesh() {
+  const int32_t BX = Constants::Chunk::LENGTH;
+  const size_t BY = static_cast<size_t>(Constants::Chunk::HEIGHT);
+  const int32_t BZ = Constants::Chunk::LENGTH;
 
   m_Data.clear();
   m_Indices.clear();

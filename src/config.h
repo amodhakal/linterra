@@ -78,6 +78,11 @@ constexpr std::int32_t FRACTAL_OCTAVE = 8;
 constexpr float FRACTAL_GAIN = 0.4f;
 constexpr float FRACTAL_LACUNARITY = 2.0f;
 constexpr float FREQUENCY = 0.005f;
+#if defined(__APPLE__)
+constexpr bool USE_GPU = false;
+#else
+constexpr bool USE_GPU = true;
+#endif
 
 }  // namespace Noise
 

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
+#include <print>
 
 #include <glm/glm.hpp>
 
@@ -33,7 +34,28 @@ float ChunkManager::getChunkDistanceSquared(const glm::vec2 &chunkPos,
   return dx * dx + dz * dz;
 }
 
-void ChunkManager::load() {}
+void ChunkManager::load() {
+  if (Constants::Noise::USE_GPU) {
+    try {
+      m_ComputeShader.loadCompute(Constants::TERRAIN_COMPUTE_PATH);
+      m_ComputeShader.newUniform("uChunkPos");
+      m_ComputeShader.newUniform("uFrequency");
+      m_ComputeShader.newUniform("uMaxHeight");
+      m_ComputeShader.newUniform("uExtSide");
+      m_ComputeShader.newUniform("uSeed");
+      m_ComputeShader.newUniform("uOctaves");
+      m_ComputeShader.newUniform("uGain");
+      m_ComputeShader.newUniform("uLacunarity");
+
+      size_t kExtSide = Chunk::kExtSide;
+      size_t ssboSize = kExtSide * kExtSide * sizeof(uint32_t);
+      m_HeightMapSSBO = m_Renderer->createBuffer(BufferType::Storage);
+      m_Renderer->setBufferData(*m_HeightMapSSBO, nullptr, ssboSize, BufferUsage::Dynamic);
+    } catch (const std::exception& e) {
+      std::println("Failed to load terrain compute shader, falling back to CPU noise: {}", e.what());
+    }
+  }
+}
 
 void ChunkManager::render(const Camera *camera, Shader &shader) {
   const glm::vec3 cameraPosition = camera->m_Position;
@@ -108,10 +130,19 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       }
 
       TaskResult &result = *resultPtr;
-      m_ThreadPool.enqueue([&result, position]() {
-        result.chunk.generateMeshData(position);
-        result.uploadReady.store(true, std::memory_order_release);
-      });
+      if (Constants::Noise::USE_GPU && m_HeightMapSSBO && m_ComputeShader.getId() != 0) {
+        m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
+        result.chunk.generateHeightMapGPU(position, m_ComputeShader, *m_HeightMapSSBO);
+        m_ThreadPool.enqueue([&result]() {
+          result.chunk.generateMesh();
+          result.uploadReady.store(true, std::memory_order_release);
+        });
+      } else {
+        m_ThreadPool.enqueue([&result, position]() {
+          result.chunk.generateMeshData(position);
+          result.uploadReady.store(true, std::memory_order_release);
+        });
+      }
     }
   }
 
