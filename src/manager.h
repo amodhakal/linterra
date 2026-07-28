@@ -61,6 +61,7 @@ class ChunkManager {
 public:
   explicit ChunkManager(IRenderer* renderer);
   void load();
+  void loadComputeShader(const char* computePath);
 
   void render(const Camera *camera, Shader &shader);
 
@@ -71,6 +72,8 @@ private:
                                       const glm::vec3 &cameraPos);
 
   IRenderer* m_Renderer = nullptr;
+  std::unique_ptr<IBuffer> m_HeightMapSSBO;
+  Shader m_ComputeShader;
   std::unordered_map<glm::vec2, Chunk> m_ProcessedChunks;
   std::unordered_set<glm::vec2> m_ProcessingPositions;
 

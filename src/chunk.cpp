@@ -6,6 +6,7 @@
 
 #include "config.h"
 #include "renderer/renderer.hpp"
+#include "shader.h"
 
 Chunk::Chunk(IRenderer* renderer)
     : m_Renderer(renderer), m_VboSize(0), m_IndexCount(0) {}
@@ -67,6 +68,50 @@ Chunk &Chunk::operator=(Chunk &&other) noexcept {
 }
 
 Chunk::~Chunk() { cleanup(); }
+
+void Chunk::generateHeightMapGPU(const glm::vec2 &position,
+                                  Shader &computeShader, IBuffer &ssbo) {
+  // Dispatch the compute shader to fill the SSBO with height values.
+  // The SSBO is already bound at binding point 0 by the caller.
+  computeShader.use();
+  computeShader.setUniformVec2("uChunkPos", position);
+  computeShader.setUniformFloat("uFrequency",
+                                 Constants::Noise::FREQUENCY);
+  computeShader.setUniformUInt("uMaxHeight",
+                                static_cast<uint32_t>(Constants::Chunk::MAX_BLOCK_HEIGHT));
+  computeShader.setUniformUInt("uExtSide", kExtSide);
+  computeShader.setUniformUInt("uSeed", Noise::getSeed());
+  computeShader.setUniformInt("uOctaves", Constants::Noise::FRACTAL_OCTAVE);
+  computeShader.setUniformFloat("uGain", Constants::Noise::FRACTAL_GAIN);
+  computeShader.setUniformFloat("uLacunarity",
+                                 Constants::Noise::FRACTAL_LACUNARITY);
+
+  // Dispatch enough groups to cover kExtSide x kExtSide.
+  // local_size is 16x16, so we need ceil(kExtSide / 16) groups per axis.
+  constexpr uint32_t kLocalSize = 16;
+  uint32_t groups = (kExtSide + kLocalSize - 1) / kLocalSize;
+  computeShader.dispatch(groups, groups, 1);
+
+  // Read back the SSBO into the extended height map.
+  size_t byteCount = kExtSide * kExtSide * sizeof(uint32_t);
+  std::vector<uint32_t> gpuHeights(kExtSide * kExtSide);
+  m_Renderer->getBufferSubData(ssbo, 0, byteCount, gpuHeights.data());
+
+  for (uint32_t ex = 0; ex < kExtSide; ex++) {
+    for (uint32_t ez = 0; ez < kExtSide; ez++) {
+      m_ExtendedHeightMap[ex][ez] =
+          static_cast<uint16_t>(gpuHeights[ez * kExtSide + ex]);
+    }
+  }
+
+  // Copy the interior into the regular height map (same as CPU path).
+  for (int32_t x = 0; x < Constants::Chunk::LENGTH; ++x) {
+    for (int32_t z = 0; z < Constants::Chunk::LENGTH; ++z) {
+      m_HeightMap[x][z] = m_ExtendedHeightMap[static_cast<uint32_t>(x + 1)]
+                                           [static_cast<uint32_t>(z + 1)];
+    }
+  }
+}
 
 void Chunk::generateMeshData(const glm::vec2 &position) {
   const int32_t BX = Constants::Chunk::LENGTH;

@@ -10,7 +10,8 @@
 enum class BufferType : uint8_t {
   Vertex = 0,
   Index = 1,
-  Uniform = 2
+  Uniform = 2,
+  Storage = 3
 };
 
 enum class BufferUsage : uint8_t {
@@ -110,6 +111,8 @@ class IShaderProgram {
   virtual void setUniform1i(int location, int value) = 0;
   virtual void setUniform1iv(int location, int count, const int* values) = 0;
   virtual void setUniform1f(int location, float value) = 0;
+  virtual void setUniform1ui(int location, uint32_t value) = 0;
+  virtual void setUniform2f(int location, float x, float y) = 0;
   virtual void setUniform3f(int location, float x, float y, float z) = 0;
   virtual uint32_t getId() const = 0;
 };
@@ -139,6 +142,9 @@ class IRenderer {
   virtual std::unique_ptr<IBuffer> createBuffer(BufferType type) = 0;
   virtual void setBufferData(IBuffer& buffer, const void* data, size_t size,
                               BufferUsage usage) = 0;
+  virtual void bindBufferBase(IBuffer& buffer, uint32_t bindingPoint) = 0;
+  virtual void getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) = 0;
+  virtual void dispatchCompute(uint32_t numGroupsX, uint32_t numGroupsY, uint32_t numGroupsZ) = 0;
 
   virtual std::unique_ptr<IVertexArray> createVertexArray() = 0;
   virtual void setVertexAttribute(IVertexArray& va, uint32_t index, int size,

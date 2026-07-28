@@ -9,6 +9,7 @@
 
 class IRenderer;
 class IShaderProgram;
+class IBuffer;
 
 class Shader {
  public:
@@ -21,6 +22,9 @@ class Shader {
   Shader& operator=(Shader&& other) noexcept;
 
   void load(const char* vertexPath, const char* fragmentPath);
+  void loadCompute(const char* computePath);
+  void dispatch(uint32_t numGroupsX, uint32_t numGroupsY, uint32_t numGroupsZ);
+  void bindBufferBase(IBuffer& buffer, uint32_t bindingPoint);
   void use();
   [[nodiscard]] std::uint32_t getId() const;
 
@@ -29,6 +33,8 @@ class Shader {
   void setUniformInt(const char* name, int value);
   void setUniformIntArray(const char* name, const int* values, int count);
   void setUniformFloat(const char* name, float value);
+  void setUniformUInt(const char* name, uint32_t value);
+  void setUniformVec2(const char* name, glm::vec2 value);
   void setUniformVec3(const char* name, glm::vec3 value);
 
  private:

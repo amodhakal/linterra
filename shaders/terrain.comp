@@ -1,0 +1,126 @@
+#version 430 core
+
+// Compute shader: procedural terrain heightmap generation via SSBO.
+//
+// Each invocation writes one height value into the HeightMapBuffer SSBO.
+// The noise function mirrors the CPU-side Noise::fbm / Noise::noised
+// (quintic-interpolated value noise with configurable octaves, gain,
+// lacunarity and frequency) so that GPU and CPU produce identical heightmaps
+// for the same seed and parameters.
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(std430, binding = 0) buffer HeightMapBuffer {
+    uint heights[];
+};
+
+uniform vec2 uChunkPos;
+uniform float uFrequency;
+uniform uint uMaxHeight;
+uniform uint uExtSide;
+uniform uint uSeed;
+uniform int uOctaves;
+uniform float uGain;
+uniform float uLacunarity;
+
+// --- Hash (matches CPU hash21 / hash01) -----------------------------------
+
+float hash21(int x, int y) {
+    uint n = uint(x) + uint(y) * 57u;
+    n = (n << 13) ^ n;
+    n ^= uSeed;
+    uint nn = (n * (n * n * 15731u + 789221u) + 1376312589u) & 0x7fffffffu;
+    return 1.0 - float(nn) / 1073741824.0;  // [-1, 1]
+}
+
+float hash01(int x, int y) {
+    return 0.5 * (hash21(x, y) + 1.0);
+}
+
+// --- Quintic interpolation (matches CPU quintic / quintic_d) ---------------
+
+float quintic(float t) {
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+// --- 2D value noise with derivative (matches CPU noised) -------------------
+
+struct Noise2D {
+    float value;
+    vec2 deriv;
+};
+
+Noise2D noised(vec2 p) {
+    vec2 P = floor(p);
+    vec2 w = fract(p);
+
+    float ux = quintic(w.x);
+    float uy = quintic(w.y);
+    float dux = 30.0 * w.x * w.x * (w.x * (w.x - 1.0) + 2.0);
+    float duy = 30.0 * w.y * w.y * (w.y * (w.y - 1.0) + 2.0);
+
+    int ix = int(P.x);
+    int iy = int(P.y);
+
+    float a = hash01(ix + 0, iy + 0);
+    float b = hash01(ix + 1, iy + 0);
+    float c = hash01(ix + 0, iy + 1);
+    float d = hash01(ix + 1, iy + 1);
+
+    float k0 = a;
+    float k1 = b - a;
+    float k2 = c - a;
+    float k3 = a - b - c + d;
+
+    float n = k0 + k1 * ux + k2 * uy + k3 * ux * uy;
+    float dn_dx = (k1 + k3 * uy) * dux;
+    float dn_dy = (k2 + k3 * ux) * duy;
+
+    // CPU returns: value = -1 + 2*n, deriv = 2 * (dn_dx, dn_dy)
+    return Noise2D(-1.0 + 2.0 * n, 2.0 * vec2(dn_dx, dn_dy));
+}
+
+// --- Fractal Brownian Motion (matches CPU fbm) -----------------------------
+
+float fbm(vec2 p) {
+    float amplitude = 1.0;
+    float value = 0.0;
+    float maxAmp = 0.0;
+    vec2 pos = p;
+
+    for (int i = 0; i < uOctaves; i++) {
+        Noise2D n = noised(pos);
+        value += amplitude * n.value;
+        maxAmp += amplitude;
+        amplitude *= uGain;
+        pos *= uLacunarity;
+    }
+
+    if (maxAmp > 0.0) {
+        value /= maxAmp;
+    }
+    return value;
+}
+
+void main() {
+    uint lx = gl_GlobalInvocationID.x;
+    uint lz = gl_GlobalInvocationID.y;
+
+    if (lx >= uExtSide || lz >= uExtSide) {
+        return;
+    }
+
+    float baseX = uChunkPos.x * float(uExtSide - 2u);
+    float baseZ = uChunkPos.y * float(uExtSide - 2u);
+
+    // Match CPU: noiseX = baseX + (lx - 1), noiseZ = baseZ + (lz - 1)
+    float noiseX = baseX + float(int(lx) - 1);
+    float noiseZ = baseZ + float(int(lz) - 1);
+
+    float n = fbm(vec2(noiseX, noiseZ) * uFrequency);
+    n = n / 2.0 + 0.5;  // [-1,1] -> [0,1]
+
+    uint h = uint(floor(n * float(uMaxHeight)));
+    uint index = lz * uExtSide + lx;
+    heights[index] = h;
+}

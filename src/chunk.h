@@ -11,6 +11,7 @@
 class IRenderer;
 class IBuffer;
 class IVertexArray;
+class Shader;
 
 enum BlockType : uint8_t { AIR = 0, GRASS = 1, DIRT = 2, WATER = 3 };
 
@@ -46,6 +47,14 @@ public:
   Chunk &operator=(Chunk &&other) noexcept;
 
   void generateMeshData(const glm::vec2 &position);
+
+  /** GPU-accelerated heightmap generation via compute shader + SSBO.
+   *  Writes the extended heightmap into m_ExtendedHeightMap by dispatching
+   *  the terrain compute shader into the provided SSBO. The caller must
+   *  have already bound the SSBO at binding point 0 and loaded the compute
+   *  shader uniforms. */
+  void generateHeightMapGPU(const glm::vec2 &position, Shader &computeShader,
+                            IBuffer &ssbo);
 
   void pass();
   void render();

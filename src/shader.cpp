@@ -59,6 +59,32 @@ void Shader::load(const char* vertexPath, const char* fragmentPath) {
   m_Program = m_Renderer->createShaderProgram(std::move(shaders));
 }
 
+void Shader::loadCompute(const char* computePath) {
+  m_Program.reset();
+
+  auto computeShader =
+      m_Renderer->createShader(ShaderType::Compute, getShaderSource(computePath).c_str());
+  if (!computeShader->isCompiled()) {
+    throw std::runtime_error("Compute shader compilation: " + computeShader->getCompileLog());
+  }
+
+  std::vector<std::unique_ptr<IShader>> shaders;
+  shaders.push_back(std::move(computeShader));
+
+  m_Program = m_Renderer->createShaderProgram(std::move(shaders));
+}
+
+void Shader::dispatch(uint32_t numGroupsX, uint32_t numGroupsY, uint32_t numGroupsZ) {
+  if (m_Program) {
+    m_Program->use();
+    m_Renderer->dispatchCompute(numGroupsX, numGroupsY, numGroupsZ);
+  }
+}
+
+void Shader::bindBufferBase(IBuffer& buffer, uint32_t bindingPoint) {
+  m_Renderer->bindBufferBase(buffer, bindingPoint);
+}
+
 void Shader::use() {
   if (m_Program) {
     m_Program->use();
@@ -96,6 +122,18 @@ void Shader::setUniformIntArray(const char* name, const int* values, int count) 
 void Shader::setUniformFloat(const char* name, float value) {
   if (m_Program && m_Uniforms.contains(name)) {
     m_Program->setUniform1f(m_Uniforms[name], value);
+  }
+}
+
+void Shader::setUniformUInt(const char* name, uint32_t value) {
+  if (m_Program && m_Uniforms.contains(name)) {
+    m_Program->setUniform1ui(m_Uniforms[name], value);
+  }
+}
+
+void Shader::setUniformVec2(const char* name, glm::vec2 value) {
+  if (m_Program && m_Uniforms.contains(name)) {
+    m_Program->setUniform2f(m_Uniforms[name], value.x, value.y);
   }
 }
 
