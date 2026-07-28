@@ -8,6 +8,19 @@ Linterra is a from-scratch, Minecraft-style voxel engine written in modern C++ a
 
 ## Implemented Features
 
+### Milestone 9 — GPU-Accelerated Terrain Generation & Platform-Adaptive Noise Fallback
+
+This milestone introduced GPU compute shader acceleration for procedural terrain heightmap generation via Shader Storage Buffer Objects (SSBOs), along with platform-adaptive noise selection.
+
+**GPU Compute Terrain Generation**
+- Added `terrain.comp`: parallelizes FBM noise evaluation on the GPU using compute shaders (`local_size_x = 16`, `local_size_y = 16`).
+- Integrated Shader Storage Buffer Objects (`BufferType::Storage`) to store generated heightmaps and read them back via `IRenderer::getBufferSubData`.
+- Split chunk generation into independent heightmap generation (CPU vs GPU) and CPU-parallelized vertex meshing (`Chunk::generateMesh`).
+
+**Platform-Adaptive Noise Flag**
+- Added `Constants::Noise::USE_GPU` flag to control whether noise generation runs on the CPU or GPU.
+- Implemented automatic fallback for macOS (`#if defined(__APPLE__)`), setting `USE_GPU = false` to avoid compilation errors on OpenGL 4.1 contexts while defaulting to GPU acceleration on OpenGL 4.3+ platforms.
+
 ### Milestone 8 — Split Fog into a Post-Process Pass
 
 This milestone decoupled fog from the scene's fragment shader by moving it into a dedicated post-process stage, so general rendering and atmospheric effects are now independent subsystems.

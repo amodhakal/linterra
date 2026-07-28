@@ -4,6 +4,8 @@
 #include <memory>
 #include <vector>
 
+#include <glm/glm.hpp>
+
 #include <glad/glad.h>
 
 #include "config.h"
@@ -47,6 +49,8 @@ public:
   Chunk &operator=(Chunk &&other) noexcept;
 
   void generateMeshData(const glm::vec2 &position);
+  void generateHeightMapCPU(const glm::vec2 &position);
+  void generateMesh();
 
   /** GPU-accelerated heightmap generation via compute shader + SSBO.
    *  Writes the extended heightmap into m_ExtendedHeightMap by dispatching
@@ -62,6 +66,9 @@ public:
 
   uint16_t getHighestBlockY(uint32_t blockX, uint32_t blockZ);
 
+  static constexpr uint32_t kExtSide =
+      static_cast<uint32_t>(Constants::Chunk::LENGTH) + 2u;
+
 private:
   IRenderer* m_Renderer = nullptr;
   std::unique_ptr<IBuffer> m_VBO;
@@ -72,9 +79,6 @@ private:
 
   std::vector<PackedVertex> m_Data;
   std::vector<uint32_t> m_Indices;
-
-  static constexpr uint32_t kExtSide =
-      static_cast<uint32_t>(Constants::Chunk::LENGTH) + 2u;
 
   uint16_t m_HeightMap[Constants::Chunk::LENGTH][Constants::Chunk::LENGTH];
 
