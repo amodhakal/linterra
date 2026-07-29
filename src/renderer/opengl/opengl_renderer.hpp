@@ -73,6 +73,7 @@ class OpenGLRenderer : public IRenderer {
   float getTimeSeconds() override;
   bool isKeyPressed(Key key) override;
   void setWindowShouldClose(bool shouldClose) override;
+  void* getNativeWindow() override;
 
   void bindFramebuffer(std::uint32_t framebufferId) override;
   std::uint32_t getLastError() override;

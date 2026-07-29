@@ -7,6 +7,10 @@
 #include <string>
 #include <vector>
 
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_opengl3.h>
+
 #include "config.h"
 #include "player.h"
 #include "renderer/renderer.hpp"
@@ -21,8 +25,6 @@ Application::Application(const char* title, const uint width, const uint height,
       m_Player(Constants::Camera::DEFAULT_POSITION),
       m_TextureArray(m_Renderer.get()),
       m_BgColor(bgColor),
-      m_FpsAttempts(0),
-      m_CombinedDeltaTime(0),
       m_lastFrame(0)
 
 {
@@ -44,6 +46,15 @@ Application::Application(const char* title, const uint width, const uint height,
   if (!m_Renderer->loadContextFunctions()) {
     throw std::runtime_error("Failed to initialize GLAD");
   }
+
+  // Initialize ImGui
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO(); (void)io;
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  ImGui::StyleColorsDark();
+  ImGui_ImplGlfw_InitForOpenGL(static_cast<GLFWwindow*>(m_Renderer->getNativeWindow()), true);
+  ImGui_ImplOpenGL3_Init("#version 330 core");
 
   // Empty VAO required to issue the attribute-less fullscreen-triangle draw
   // in a core OpenGL context.
@@ -98,6 +109,9 @@ Application::Application(const char* title, const uint width, const uint height,
 }
 
 Application::~Application() {
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
   m_Renderer->terminateWindowing();
 }
 
@@ -136,6 +150,27 @@ void Application::update() {
   m_Renderer->bindVertexArray(*m_FullscreenVao);
   m_Renderer->draw(PrimitiveType::Triangles, 3, 0);  // fullscreen triangle
 
+  // --- Pass 3: ImGui UI ---
+  ImGui_ImplOpenGL3_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+
+  ImGuiIO& io = ImGui::GetIO();
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - 280.0f, 10.0f), ImGuiCond_Always);
+  ImGui::SetNextWindowSize(ImVec2(270.0f, 110.0f), ImGuiCond_Always);
+  ImGui::Begin("Debug Info", nullptr,
+               ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+               ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
+  ImGui::Text("FPS: %.1f (%.3f ms)", io.Framerate, 1000.0f / io.Framerate);
+  if (auto cam = m_Player.getCamera()) {
+    ImGui::Text("Pos: X: %.2f Y: %.2f Z: %.2f", cam->m_Position.x, cam->m_Position.y, cam->m_Position.z);
+    ImGui::Text("Dir: X: %.2f Y: %.2f Z: %.2f", cam->m_Front.x, cam->m_Front.y, cam->m_Front.z);
+  }
+  ImGui::End();
+
+  ImGui::Render();
+  ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
   m_Renderer->swapBuffers();
   m_Renderer->pollEvents();
 
@@ -153,17 +188,6 @@ float Application::getDeltaTime() {
   float currentFrame = m_Renderer->getTimeSeconds();
   float deltaTime = currentFrame - m_lastFrame;
   m_lastFrame = currentFrame;
-
-  m_CombinedDeltaTime += deltaTime;
-  m_FpsAttempts++;
-
-  constexpr std::uint32_t MAX_ATTEMPTS = 100;
-  if (m_FpsAttempts >= MAX_ATTEMPTS) {
-    std::println("FPS: {}",
-                 std::to_string(1 / (m_CombinedDeltaTime / MAX_ATTEMPTS)));
-    m_CombinedDeltaTime = 0;
-    m_FpsAttempts = 0;
-  }
 
   return deltaTime;
 }
