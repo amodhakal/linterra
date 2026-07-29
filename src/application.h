@@ -32,8 +32,6 @@ class Application {
   Texture m_TextureArray;
 
   glm::vec4 m_BgColor;
-  uint m_FpsAttempts;
-  float m_CombinedDeltaTime;
   float m_lastFrame;
   std::uint32_t m_FrameWidth;   // drawing-buffer size (pixels, may differ from
   std::uint32_t m_FrameHeight;  // window logical size on HiDPI displays)

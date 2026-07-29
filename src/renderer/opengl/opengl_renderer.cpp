@@ -237,6 +237,10 @@ void OpenGLRenderer::setWindowShouldClose(bool shouldClose) {
   glfwSetWindowShouldClose(m_Window, shouldClose ? GLFW_TRUE : GLFW_FALSE);
 }
 
+void* OpenGLRenderer::getNativeWindow() {
+  return m_Window;
+}
+
 void OpenGLRenderer::bindFramebuffer(std::uint32_t framebufferId) {
   glBindFramebuffer(GL_FRAMEBUFFER, framebufferId);
 }

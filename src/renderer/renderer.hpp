@@ -188,6 +188,7 @@ class IRenderer {
   virtual float getTimeSeconds() = 0;
   virtual bool isKeyPressed(Key key) = 0;
   virtual void setWindowShouldClose(bool shouldClose) = 0;
+  virtual void* getNativeWindow() = 0;
 
   virtual void bindFramebuffer(std::uint32_t framebufferId) = 0;
   virtual std::uint32_t getLastError() = 0;

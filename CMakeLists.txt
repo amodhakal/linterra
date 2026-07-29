@@ -13,7 +13,7 @@ find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(glm REQUIRED)
 
-file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp" "vendor/glad/src/glad.c" "vendor/noise/src/noise.cpp")
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp" "vendor/glad/src/glad.c" "vendor/noise/src/noise.cpp" "vendor/imgui/imgui.cpp" "vendor/imgui/imgui_draw.cpp" "vendor/imgui/imgui_tables.cpp" "vendor/imgui/imgui_widgets.cpp" "vendor/imgui/imgui_demo.cpp" "vendor/imgui/backends/imgui_impl_glfw.cpp" "vendor/imgui/backends/imgui_impl_opengl3.cpp")
 
 if(USE_OPENGL)
   list(APPEND SOURCES
@@ -33,6 +33,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     vendor/glad/include
     vendor/noise/include
     vendor/images/include
+    vendor/imgui
+    vendor/imgui/backends
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
