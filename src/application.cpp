@@ -78,6 +78,7 @@ Application::Application(const char* title, const uint width, const uint height,
   m_ChunkManager.load();
 
   m_Renderer->enable(Feature::DepthTest);
+  m_Renderer->enable(Feature::Culling);
 
   // Scene pass uniforms.
   m_RenderShader.newUniform("uModel");

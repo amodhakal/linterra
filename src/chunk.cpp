@@ -290,12 +290,12 @@ void Chunk::generateMesh() {
           bool flipV = false;
 
           switch (d) {
-          case 0:
-            a.x = x + 1;
-            du = {0, 1, 0};
-            dv = {0, 0, 1};
-            normalId = BlockNormal::RIGHT_LEFT_NORMAL;
-            break;
+  case 0:
+    a.x = x + 1;
+    du = {0, 0, 1};
+    dv = {0, 1, 0};
+    normalId = BlockNormal::RIGHT_LEFT_NORMAL;
+    break;
           case 1:
             du = {0, 1, 0};
             dv = {0, 0, 1};
@@ -314,12 +314,12 @@ void Chunk::generateMesh() {
             dv = {0, 0, 1};
             normalId = BlockNormal::BOTTOM_NORMAL;
             break;
-          case 4:
-            a.z = z + 1;
-            du = {1, 0, 0};
-            dv = {0, 1, 0};
-            normalId = BlockNormal::FRONT_BACK_NORMAL;
-            break;
+  case 4:
+    a.z = z + 1;
+    du = {0, 1, 0};
+    dv = {1, 0, 0};
+    normalId = BlockNormal::FRONT_BACK_NORMAL;
+    break;
           case 5:
             du = {1, 0, 0};
             dv = {0, 1, 0};
