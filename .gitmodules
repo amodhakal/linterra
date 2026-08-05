@@ -1,0 +1,3 @@
+[submodule "vendor/metal-cpp"]
+	path = vendor/metal-cpp
+	url = git@github.com:apple/metal-cpp.git
