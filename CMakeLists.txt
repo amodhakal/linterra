@@ -18,3 +18,13 @@ target_link_libraries(linterra
     "-framework QuartzCore"
     "-framework Foundation"
 )
+
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/shaders.metallib
+    COMMAND xcrun -sdk macosx metal -c ${CMAKE_SOURCE_DIR}/src/shaders.metal -o ${CMAKE_BINARY_DIR}/shaders.air
+    COMMAND xcrun -sdk macosx metallib ${CMAKE_BINARY_DIR}/shaders.air -o ${CMAKE_BINARY_DIR}/shaders.metallib
+    DEPENDS ${CMAKE_SOURCE_DIR}/src/shaders.metal
+)
+
+add_custom_target(CompileShaders DEPENDS ${CMAKE_BINARY_DIR}/shaders.metallib)
+add_dependencies(linterra CompileShaders)
