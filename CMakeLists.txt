@@ -10,10 +10,11 @@ option(USE_METAL "Use Metal renderer (not implemented yet)" OFF)
 option(USE_VULKAN "Use Vulkan renderer (not implemented yet)" OFF)
 
 find_package(OpenGL REQUIRED)
-find_package(glfw3 REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SDL3 REQUIRED sdl3)
 find_package(glm REQUIRED)
 
-file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp" "vendor/glad/src/glad.c" "vendor/noise/src/noise.cpp" "vendor/imgui/imgui.cpp" "vendor/imgui/imgui_draw.cpp" "vendor/imgui/imgui_tables.cpp" "vendor/imgui/imgui_widgets.cpp" "vendor/imgui/imgui_demo.cpp" "vendor/imgui/backends/imgui_impl_glfw.cpp" "vendor/imgui/backends/imgui_impl_opengl3.cpp")
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp" "vendor/glad/src/glad.c" "vendor/noise/src/noise.cpp" "vendor/imgui/imgui.cpp" "vendor/imgui/imgui_draw.cpp" "vendor/imgui/imgui_tables.cpp" "vendor/imgui/imgui_widgets.cpp" "vendor/imgui/imgui_demo.cpp" "vendor/imgui/backends/imgui_impl_sdl3.cpp" "vendor/imgui/backends/imgui_impl_opengl3.cpp")
 
 if(USE_OPENGL)
   list(APPEND SOURCES
@@ -35,11 +36,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     vendor/images/include
     vendor/imgui
     vendor/imgui/backends
+    ${SDL3_INCLUDE_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     OpenGL::GL
-    glfw
+    ${SDL3_LIBRARIES}
     glm::glm
 )
 

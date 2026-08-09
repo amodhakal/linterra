@@ -1,3 +1,6 @@
 [submodule "models/terrain-diffusion"]
 	path = models/terrain-diffusion
 	url = https://huggingface.co/xandergos/terrain-diffusion-30m
+[submodule "vendor/metal-cpp"]
+	path = vendor/metal-cpp
+	url = git@github.com:apple/metal-cpp.git
