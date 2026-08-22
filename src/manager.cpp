@@ -85,6 +85,17 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     }
 
     const glm::ivec2 position = it->first;
+
+    // Range-check before generating/uploading work: if the camera has moved
+    // away since this task was enqueued, discard the chunk here instead of
+    // paying the GPU upload cost and cleaning it up on a later frame.
+    if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
+      std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+      m_ProcessingPositions.erase(position);
+      it = m_ProcessingChunks.erase(it);
+      continue;
+    }
+
     result.chunk.pass();
     Chunk promoted = std::move(result.chunk);
 
