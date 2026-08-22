@@ -68,14 +68,16 @@ void Chunk::resetMovedFrom(Chunk &other) noexcept {
 
 Chunk::~Chunk() { cleanup(); }
 
-void Chunk::generateHeightMapGPU(const glm::ivec2 &position,
-                                  Shader &computeShader, IBuffer &ssbo) {
-  // Dispatch the compute shader to fill the SSBO with height values.
-  // The SSBO is already bound at binding point 0 by the caller.
+void Chunk::generateHeightMapGPU(const glm::vec2 &position, uint32_t slotOffset,
+                                 Shader &computeShader) {
+  // Stage 1: dispatch only. The compute shader writes this chunk's slot in
+  // the batched SSBO; readback is deferred to finishHeightMapGPU() so the
+  // main thread never stalls on a full pipeline sync per chunk.
+  m_GpuHeightMapReady = false;
+
   computeShader.use();
-  computeShader.setUniformVec2(
-      "uChunkPos",
-      glm::vec2(static_cast<float>(position.x), static_cast<float>(position.y)));
+  computeShader.setUniformVec2("uChunkPos", position);
+  computeShader.setUniformUInt("uSlot", slotOffset);
   computeShader.setUniformFloat("uFrequency",
                                  Constants::Noise::FREQUENCY);
   computeShader.setUniformUInt("uMaxHeight",
@@ -92,11 +94,21 @@ void Chunk::generateHeightMapGPU(const glm::ivec2 &position,
   constexpr uint32_t kLocalSize = 16;
   uint32_t groups = (kExtSide + kLocalSize - 1) / kLocalSize;
   computeShader.dispatch(groups, groups, 1);
+}
 
-  // Read back the SSBO into the extended height map.
+void Chunk::finishHeightMapGPU(uint32_t slotOffset, IBuffer &ssbo) {
+  if (m_GpuHeightMapReady) {
+    return;
+  }
+
+  // Stage 2: read back this chunk's slot of the batched SSBO. Called
+  // deferred (at least one frame after dispatch) so the GPU has usually
+  // already finished; the memory barrier issued at dispatch time makes the
+  // writes visible without a full pipeline stall.
   size_t byteCount = kExtSide * kExtSide * sizeof(uint32_t);
+  size_t slotBytes = static_cast<size_t>(slotOffset) * byteCount;
   std::vector<uint32_t> gpuHeights(kExtSide * kExtSide);
-  m_Renderer->getBufferSubData(ssbo, 0, byteCount, gpuHeights.data());
+  m_Renderer->getBufferSubData(ssbo, slotBytes, byteCount, gpuHeights.data());
 
   for (uint32_t ex = 0; ex < kExtSide; ex++) {
     for (uint32_t ez = 0; ez < kExtSide; ez++) {
@@ -112,6 +124,8 @@ void Chunk::generateHeightMapGPU(const glm::ivec2 &position,
                                            [static_cast<uint32_t>(z + 1)];
     }
   }
+
+  m_GpuHeightMapReady = true;
 }
 
 void Chunk::generateMeshData(const glm::ivec2 &position) {

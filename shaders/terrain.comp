@@ -15,6 +15,7 @@ layout(std430, binding = 0) buffer HeightMapBuffer {
 };
 
 uniform vec2 uChunkPos;
+uniform uint uSlot;
 uniform float uFrequency;
 uniform uint uMaxHeight;
 uniform uint uExtSide;
@@ -121,6 +122,9 @@ void main() {
     n = n / 2.0 + 0.5;  // [-1,1] -> [0,1]
 
     uint h = uint(floor(n * float(uMaxHeight)));
-    uint index = lz * uExtSide + lx;
+    // Each chunk writes into its own slot of the batched heightmap SSBO so
+    // several chunks can be in flight before a single deferred readback.
+    uint base = uSlot * uExtSide * uExtSide;
+    uint index = base + lz * uExtSide + lx;
     heights[index] = h;
 }

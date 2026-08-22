@@ -17,22 +17,30 @@ class IRenderer;
 
 struct TaskResult {
   Chunk chunk;
+  std::atomic<bool> meshReady{false};
   std::atomic<bool> uploadReady{false};
+  uint32_t slot = 0;
 
   TaskResult() = delete;
   explicit TaskResult(IRenderer* renderer) : chunk(renderer) {}
 
   TaskResult(TaskResult &&other) noexcept
       : chunk(std::move(other.chunk)),
+        meshReady(other.meshReady.load(std::memory_order_relaxed)),
         uploadReady(
-            other.uploadReady.load(std::memory_order_relaxed)) {}
+            other.uploadReady.load(std::memory_order_relaxed)),
+        slot(other.slot) {}
 
   TaskResult &operator=(TaskResult &&other) noexcept {
     if (this != &other) {
       chunk = std::move(other.chunk);
+      meshReady.store(
+          other.meshReady.load(std::memory_order_relaxed),
+          std::memory_order_relaxed);
       uploadReady.store(
           other.uploadReady.load(std::memory_order_relaxed),
           std::memory_order_relaxed);
+      slot = other.slot;
     }
     return *this;
   }
@@ -48,6 +56,7 @@ struct TaskResult {
 
 namespace std {
 
+template <>
 // Chunks are keyed on integer chunk coordinates (not float world
 // coordinates) so hashing stays exact no matter how far from the origin
 // the player walks.
@@ -78,6 +87,12 @@ private:
   IRenderer* m_Renderer = nullptr;
   std::unique_ptr<IBuffer> m_HeightMapSSBO;
   Shader m_ComputeShader;
+
+  // Batched GPU heightmap generation: each in-flight chunk gets a slot of
+  // the shared SSBO; readback is deferred so the main thread never stalls
+  // on a per-chunk pipeline sync.
+  static constexpr uint32_t kGpuSlots = 64;
+  uint32_t m_NextGpuSlot = 0;
   std::unordered_map<glm::ivec2, Chunk> m_ProcessedChunks;
   std::unordered_set<glm::ivec2> m_ProcessingPositions;
 
