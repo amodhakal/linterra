@@ -1,6 +1,7 @@
 #include "chunk.h"
 #include <noise/noise.h>
 
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <type_traits>
@@ -263,6 +264,10 @@ void Chunk::generateMesh() {
     if (ny < 0 || ny >= static_cast<int32_t>(BY)) {
       return true;
     }
+
+    // Halo lookup: local coords in [-1, LENGTH] map to [0, kExtSide).
+    assert(nx >= -1 && nx <= static_cast<int32_t>(Constants::Chunk::LENGTH));
+    assert(nz >= -1 && nz <= static_cast<int32_t>(Constants::Chunk::LENGTH));
 
     const uint32_t ex = static_cast<uint32_t>(nx + 1);
     const uint32_t ez = static_cast<uint32_t>(nz + 1);
