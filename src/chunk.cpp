@@ -199,7 +199,7 @@ void Chunk::generateMesh() {
       v.bits = 0;
       v.x = static_cast<uint32_t>(bx & 0xFF);
       v.z = static_cast<uint32_t>(bz & 0xFF);
-      v.y = static_cast<uint32_t>(by & 0xFF);
+      v.y = static_cast<uint32_t>(by & 0x3FF);
       v.normal = static_cast<uint32_t>(normalId);
       v.texId = static_cast<uint32_t>(texId & 3);
       v.corner = corner;

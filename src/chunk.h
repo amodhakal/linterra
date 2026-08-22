@@ -27,13 +27,14 @@ enum BlockNormal : uint8_t {
 union PackedVertex {
   uint32_t bits;
   struct {
+    // Y gets 10 bits (supports worlds up to y=1023); the former 2-bit
+    // _pad is consumed so the vertex still packs into a uint32_t.
     uint32_t x      : 8;
     uint32_t z      : 8;
-    uint32_t y      : 8;
+    uint32_t y      : 10;
     uint32_t normal : 2;
     uint32_t texId   : 2;
     uint32_t corner  : 2;
-    uint32_t _pad   : 2;
   };
 };
 
