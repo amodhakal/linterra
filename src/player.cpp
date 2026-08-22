@@ -30,7 +30,7 @@ void Player::update(float deltaTime, std::int32_t currentY) {
 void Player::jump(float cameraSpeed) {
   if (m_AllowJumping && Constants::DO_GRAVITY) {
     m_Velocity.y = Constants::Camera::JUMP_VELOCITY;
-    m_AllowJumping = true;
+    m_AllowJumping = false;
   } else {
     m_Camera.m_Position.y += cameraSpeed;
   }
