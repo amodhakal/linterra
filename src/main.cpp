@@ -12,14 +12,15 @@ int main(int argc, char *argv[]) {
 
   if (argc >= 2) {
     const std::string_view input(argv[1]);
-    uint64_t parsed = 0;
     const char *first = input.data();
     const char *last = first + input.size();
+    uint64_t parsed = 0;
+    std::from_chars_result result = std::from_chars(first, last, parsed, 10);
 
-    // Reject empty, non-numeric, negative, and overflowing inputs.
-    if (input.empty() || *first == '-' ||
-        std::from_chars(first, last, parsed, 10).ec != std::errc{} ||
-        parsed > UINT32_MAX) {
+    // Reject empty, non-numeric, negative, overflowing, and partially
+    // numeric inputs (e.g. "12abc").
+    if (input.empty() || *first == '-' || result.ec != std::errc{} ||
+        result.ptr != last || parsed > UINT32_MAX) {
       std::println(stderr,
                    "Invalid seed '{}': expected an integer in [0, {}].",
                    input, UINT32_MAX);
