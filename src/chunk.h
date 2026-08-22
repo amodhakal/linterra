@@ -64,12 +64,21 @@ public:
   void render();
   void cleanup();
 
+  /** Moved-from state: a moved-from Chunk is valid but empty —
+   *  m_Renderer is nullptr, GPU resources (VBO/EBO/VAO) and mesh data
+   *  (m_Data/m_Indices) are transferred to the destination, size/count
+   *  fields are zeroed. Heightmaps are copied rather than moved, so the
+   *  moved-from chunk retains its (now stale) heightmap values; they are
+   *  safe to read but must be regenerated before reuse. */
+
   uint16_t getHighestBlockY(uint32_t blockX, uint32_t blockZ);
 
   static constexpr uint32_t kExtSide =
       static_cast<uint32_t>(Constants::Chunk::LENGTH) + 2u;
 
 private:
+  void resetMovedFrom(Chunk &other) noexcept;
+
   IRenderer* m_Renderer = nullptr;
   std::unique_ptr<IBuffer> m_VBO;
   std::unique_ptr<IBuffer> m_EBO;

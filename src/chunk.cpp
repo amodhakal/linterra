@@ -2,6 +2,8 @@
 #include <noise/noise.h>
 
 #include <cmath>
+#include <cstring>
+#include <type_traits>
 #include <utility>
 
 #include "config.h"
@@ -20,20 +22,14 @@ Chunk::Chunk(Chunk &&other) noexcept
       m_IndexCount(other.m_IndexCount),
       m_Data(std::move(other.m_Data)),
       m_Indices(std::move(other.m_Indices)) {
-  for (int32_t i = 0; i < Constants::Chunk::LENGTH; ++i) {
-    for (int32_t j = 0; j < Constants::Chunk::LENGTH; ++j) {
-      m_HeightMap[i][j] = other.m_HeightMap[i][j];
-    }
-  }
-  for (uint32_t i = 0; i < kExtSide; ++i) {
-    for (uint32_t j = 0; j < kExtSide; ++j) {
-      m_ExtendedHeightMap[i][j] = other.m_ExtendedHeightMap[i][j];
-    }
-  }
+  static_assert(std::is_trivially_copyable_v<decltype(m_HeightMap)> &&
+                    std::is_trivially_copyable_v<decltype(m_ExtendedHeightMap)>,
+                "Heightmaps must remain trivially copyable for bulk moves");
+  std::memcpy(m_HeightMap, other.m_HeightMap, sizeof(m_HeightMap));
+  std::memcpy(m_ExtendedHeightMap, other.m_ExtendedHeightMap,
+              sizeof(m_ExtendedHeightMap));
 
-  other.m_Renderer = nullptr;
-  other.m_VboSize = 0;
-  other.m_IndexCount = 0;
+  resetMovedFrom(other);
 }
 
 Chunk &Chunk::operator=(Chunk &&other) noexcept {
@@ -49,22 +45,24 @@ Chunk &Chunk::operator=(Chunk &&other) noexcept {
   m_IndexCount = other.m_IndexCount;
   m_Data = std::move(other.m_Data);
   m_Indices = std::move(other.m_Indices);
-  for (int32_t i = 0; i < Constants::Chunk::LENGTH; ++i) {
-    for (int32_t j = 0; j < Constants::Chunk::LENGTH; ++j) {
-      m_HeightMap[i][j] = other.m_HeightMap[i][j];
-    }
-  }
-  for (uint32_t i = 0; i < kExtSide; ++i) {
-    for (uint32_t j = 0; j < kExtSide; ++j) {
-      m_ExtendedHeightMap[i][j] = other.m_ExtendedHeightMap[i][j];
-    }
-  }
+  std::memcpy(m_HeightMap, other.m_HeightMap, sizeof(m_HeightMap));
+  std::memcpy(m_ExtendedHeightMap, other.m_ExtendedHeightMap,
+              sizeof(m_ExtendedHeightMap));
 
-  other.m_Renderer = nullptr;
-  other.m_VboSize = 0;
-  other.m_IndexCount = 0;
+  resetMovedFrom(other);
 
   return *this;
+}
+
+void Chunk::resetMovedFrom(Chunk &other) noexcept {
+  other.m_Renderer = nullptr;
+  other.m_VBO = nullptr; // unique_ptr already null after move
+  other.m_EBO = nullptr;
+  other.m_VAO = nullptr;
+  other.m_VboSize = 0;
+  other.m_IndexCount = 0;
+  // Heightmap data is copied (not moved), so the moved-from chunk keeps its
+  // heightmap values. They are stale but safe to read.
 }
 
 Chunk::~Chunk() { cleanup(); }
