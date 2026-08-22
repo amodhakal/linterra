@@ -17,10 +17,10 @@ uniform mat4 uProjection;
 void main() {
     int x = int(inPacked              ) & 0xFF;
     int z = int(inPacked >> 8        ) & 0xFF;
-    int y = int(inPacked >> 16       ) & 0xFF;
-    int normal = int(inPacked >> 24  ) & 0x3;
-    int texId = int(inPacked >> 26     ) & 0x3;
-    int corner = int(inPacked >> 28    ) & 0x3;
+    int y = int(inPacked >> 16       ) & 0x3FF;
+    int normal = int(inPacked >> 26  ) & 0x3;
+    int texId = int(inPacked >> 28     ) & 0x3;
+    int corner = int(inPacked >> 30    ) & 0x3;
 
     bool isU = (corner & 1) != 0;
     bool isV = (corner & 2) != 0;

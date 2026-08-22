@@ -18,7 +18,7 @@ Camera::Camera(glm::vec3 position) {
   m_Aspect = (float)Constants::SCR_WIDTH / (float)Constants::SCR_HEIGHT;
 
   m_Yaw = Constants::Camera::DEFAULT_YAW;
-  m_Pitch = Constants::Camera::DEAULT_PITCH;
+  m_Pitch = Constants::Camera::DEFAULT_PITCH;
 
   m_LastX = Constants::SCR_WIDTH / 2.0;
   m_LastY = Constants::SCR_HEIGHT / 2.0;
@@ -38,7 +38,7 @@ glm::mat4 Camera::getView() {
 
 glm::mat4 Camera::getProjection() {
   return glm::perspective(glm::radians(m_Fov), m_Aspect,
-                          Constants::Camera::NEAR, Constants::Camera::FAR);
+                          m_Near, m_Far);
 }
 
 glm::vec3 Camera::getRight() const {

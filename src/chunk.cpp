@@ -2,6 +2,8 @@
 #include <noise/noise.h>
 
 #include <cmath>
+#include <cstring>
+#include <type_traits>
 #include <utility>
 
 #include "config.h"
@@ -20,20 +22,14 @@ Chunk::Chunk(Chunk &&other) noexcept
       m_IndexCount(other.m_IndexCount),
       m_Data(std::move(other.m_Data)),
       m_Indices(std::move(other.m_Indices)) {
-  for (int32_t i = 0; i < Constants::Chunk::LENGTH; ++i) {
-    for (int32_t j = 0; j < Constants::Chunk::LENGTH; ++j) {
-      m_HeightMap[i][j] = other.m_HeightMap[i][j];
-    }
-  }
-  for (uint32_t i = 0; i < kExtSide; ++i) {
-    for (uint32_t j = 0; j < kExtSide; ++j) {
-      m_ExtendedHeightMap[i][j] = other.m_ExtendedHeightMap[i][j];
-    }
-  }
+  static_assert(std::is_trivially_copyable_v<decltype(m_HeightMap)> &&
+                    std::is_trivially_copyable_v<decltype(m_ExtendedHeightMap)>,
+                "Heightmaps must remain trivially copyable for bulk moves");
+  std::memcpy(m_HeightMap, other.m_HeightMap, sizeof(m_HeightMap));
+  std::memcpy(m_ExtendedHeightMap, other.m_ExtendedHeightMap,
+              sizeof(m_ExtendedHeightMap));
 
-  other.m_Renderer = nullptr;
-  other.m_VboSize = 0;
-  other.m_IndexCount = 0;
+  resetMovedFrom(other);
 }
 
 Chunk &Chunk::operator=(Chunk &&other) noexcept {
@@ -49,32 +45,36 @@ Chunk &Chunk::operator=(Chunk &&other) noexcept {
   m_IndexCount = other.m_IndexCount;
   m_Data = std::move(other.m_Data);
   m_Indices = std::move(other.m_Indices);
-  for (int32_t i = 0; i < Constants::Chunk::LENGTH; ++i) {
-    for (int32_t j = 0; j < Constants::Chunk::LENGTH; ++j) {
-      m_HeightMap[i][j] = other.m_HeightMap[i][j];
-    }
-  }
-  for (uint32_t i = 0; i < kExtSide; ++i) {
-    for (uint32_t j = 0; j < kExtSide; ++j) {
-      m_ExtendedHeightMap[i][j] = other.m_ExtendedHeightMap[i][j];
-    }
-  }
+  std::memcpy(m_HeightMap, other.m_HeightMap, sizeof(m_HeightMap));
+  std::memcpy(m_ExtendedHeightMap, other.m_ExtendedHeightMap,
+              sizeof(m_ExtendedHeightMap));
 
-  other.m_Renderer = nullptr;
-  other.m_VboSize = 0;
-  other.m_IndexCount = 0;
+  resetMovedFrom(other);
 
   return *this;
 }
 
+void Chunk::resetMovedFrom(Chunk &other) noexcept {
+  other.m_Renderer = nullptr;
+  other.m_VBO = nullptr; // unique_ptr already null after move
+  other.m_EBO = nullptr;
+  other.m_VAO = nullptr;
+  other.m_VboSize = 0;
+  other.m_IndexCount = 0;
+  // Heightmap data is copied (not moved), so the moved-from chunk keeps its
+  // heightmap values. They are stale but safe to read.
+}
+
 Chunk::~Chunk() { cleanup(); }
 
-void Chunk::generateHeightMapGPU(const glm::vec2 &position,
+void Chunk::generateHeightMapGPU(const glm::ivec2 &position,
                                   Shader &computeShader, IBuffer &ssbo) {
   // Dispatch the compute shader to fill the SSBO with height values.
   // The SSBO is already bound at binding point 0 by the caller.
   computeShader.use();
-  computeShader.setUniformVec2("uChunkPos", position);
+  computeShader.setUniformVec2(
+      "uChunkPos",
+      glm::vec2(static_cast<float>(position.x), static_cast<float>(position.y)));
   computeShader.setUniformFloat("uFrequency",
                                  Constants::Noise::FREQUENCY);
   computeShader.setUniformUInt("uMaxHeight",
@@ -113,14 +113,14 @@ void Chunk::generateHeightMapGPU(const glm::vec2 &position,
   }
 }
 
-void Chunk::generateMeshData(const glm::vec2 &position) {
+void Chunk::generateMeshData(const glm::ivec2 &position) {
   generateHeightMapCPU(position);
   generateMesh();
 }
 
-void Chunk::generateHeightMapCPU(const glm::vec2 &position) {
-  const float baseX = position.s * static_cast<float>(Constants::Chunk::LENGTH);
-  const float baseZ = position.t * static_cast<float>(Constants::Chunk::LENGTH);
+void Chunk::generateHeightMapCPU(const glm::ivec2 &position) {
+  const float baseX = static_cast<float>(position.x) * static_cast<float>(Constants::Chunk::LENGTH);
+  const float baseZ = static_cast<float>(position.y) * static_cast<float>(Constants::Chunk::LENGTH);
 
   auto sampleGrassHeightWorld = [&](float worldBlockX, float worldBlockZ) -> uint16_t {
     auto n = Noise::fbm(
@@ -168,6 +168,8 @@ void Chunk::generateMesh() {
       return 0;
     case BlockType::DIRT:
       return 1;
+    case BlockType::WATER:
+      return 2;
     default:
       return 1;
     }
@@ -197,7 +199,7 @@ void Chunk::generateMesh() {
       v.bits = 0;
       v.x = static_cast<uint32_t>(bx & 0xFF);
       v.z = static_cast<uint32_t>(bz & 0xFF);
-      v.y = static_cast<uint32_t>(by & 0xFF);
+      v.y = static_cast<uint32_t>(by & 0x3FF);
       v.normal = static_cast<uint32_t>(normalId);
       v.texId = static_cast<uint32_t>(texId & 3);
       v.corner = corner;

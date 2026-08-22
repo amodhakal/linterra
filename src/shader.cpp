@@ -1,5 +1,6 @@
 #include "shader.h"
 
+#include <cstdio>
 #include <glm/gtc/type_ptr.hpp>
 #include <stdexcept>
 #include <string>
@@ -97,7 +98,14 @@ std::uint32_t Shader::getId() const {
 
 void Shader::newUniform(const char* name) {
   if (m_Program) {
-    m_Uniforms[name] = m_Program->getUniformLocation(name);
+    int location = m_Program->getUniformLocation(name);
+    if (location < 0) {
+      std::fprintf(stderr,
+                   "Shader::newUniform: uniform \"%s\" not found in shader "
+                   "program (location = -1)\n",
+                   name);
+    }
+    m_Uniforms[name] = location;
   }
 }
 

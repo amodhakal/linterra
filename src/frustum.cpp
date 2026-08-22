@@ -3,7 +3,8 @@
 #include "config.h"
 
 Frustum::Frustum(const Camera *camera) {
-  float halfVSide = camera->m_Far * tan(camera->m_Fov * 0.5);
+  float halfVSide =
+      camera->m_Far * tan(glm::radians(camera->m_Fov) * 0.5f);
   float halfHSide = halfVSide * camera->m_Aspect;
   const glm::vec3 frontMultFar = camera->m_Far * camera->m_Front;
 
@@ -24,12 +25,12 @@ Frustum::Frustum(const Camera *camera) {
       glm::cross(frontMultFar + camera->m_Up * halfVSide, camera->getRight())};
 }
 
-bool Frustum::isChunkInside(const glm::vec2 &position) {
+bool Frustum::isChunkInside(const glm::ivec2 &position) {
   glm::vec3 chunkCorner1 = {
-      static_cast<float>((position.s * Constants::Chunk::LENGTH) -
+      static_cast<float>((position.x * Constants::Chunk::LENGTH) -
                          (Constants::Chunk::LENGTH / 2.0)),
       0.0,
-      static_cast<float>((position.t * Constants::Chunk::LENGTH) -
+      static_cast<float>((position.y * Constants::Chunk::LENGTH) -
                          (Constants::Chunk::LENGTH / 2.0))};
   glm::vec3 chunkCorner2 = {chunkCorner1.x + Constants::Chunk::LENGTH,
                             Constants::Chunk::HEIGHT,

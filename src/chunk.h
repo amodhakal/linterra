@@ -27,13 +27,14 @@ enum BlockNormal : uint8_t {
 union PackedVertex {
   uint32_t bits;
   struct {
+    // Y gets 10 bits (supports worlds up to y=1023); the former 2-bit
+    // _pad is consumed so the vertex still packs into a uint32_t.
     uint32_t x      : 8;
     uint32_t z      : 8;
-    uint32_t y      : 8;
+    uint32_t y      : 10;
     uint32_t normal : 2;
     uint32_t texId   : 2;
     uint32_t corner  : 2;
-    uint32_t _pad   : 2;
   };
 };
 
@@ -48,8 +49,8 @@ public:
   Chunk(Chunk &&other) noexcept;
   Chunk &operator=(Chunk &&other) noexcept;
 
-  void generateMeshData(const glm::vec2 &position);
-  void generateHeightMapCPU(const glm::vec2 &position);
+  void generateMeshData(const glm::ivec2 &position);
+  void generateHeightMapCPU(const glm::ivec2 &position);
   void generateMesh();
 
   /** GPU-accelerated heightmap generation via compute shader + SSBO.
@@ -57,12 +58,19 @@ public:
    *  the terrain compute shader into the provided SSBO. The caller must
    *  have already bound the SSBO at binding point 0 and loaded the compute
    *  shader uniforms. */
-  void generateHeightMapGPU(const glm::vec2 &position, Shader &computeShader,
+  void generateHeightMapGPU(const glm::ivec2 &position, Shader &computeShader,
                             IBuffer &ssbo);
 
   void pass();
   void render();
   void cleanup();
+
+  /** Moved-from state: a moved-from Chunk is valid but empty —
+   *  m_Renderer is nullptr, GPU resources (VBO/EBO/VAO) and mesh data
+   *  (m_Data/m_Indices) are transferred to the destination, size/count
+   *  fields are zeroed. Heightmaps are copied rather than moved, so the
+   *  moved-from chunk retains its (now stale) heightmap values; they are
+   *  safe to read but must be regenerated before reuse. */
 
   uint16_t getHighestBlockY(uint32_t blockX, uint32_t blockZ);
 
@@ -70,6 +78,8 @@ public:
       static_cast<uint32_t>(Constants::Chunk::LENGTH) + 2u;
 
 private:
+  void resetMovedFrom(Chunk &other) noexcept;
+
   IRenderer* m_Renderer = nullptr;
   std::unique_ptr<IBuffer> m_VBO;
   std::unique_ptr<IBuffer> m_EBO;
