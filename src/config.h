@@ -12,8 +12,7 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 
-// application.h signatures use uint; derive from fixed-width aliases.
-using uint = std::uint32_t;
+// (no global type aliases here; use <cstdint> fixed-width types explicitly)
 
 namespace Constants {
 constexpr auto VERTEX_PATH = "./shaders/shaders.vert";

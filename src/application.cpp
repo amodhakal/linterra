@@ -16,7 +16,7 @@
 #include "renderer/renderer.hpp"
 #include "shader.h"
 
-Application::Application(const char* title, const uint width, const uint height,
+Application::Application(const char* title, const std::uint32_t width, const std::uint32_t height,
                          glm::vec4 bgColor)
     : m_Renderer(createRenderer(RenderBackend::OpenGL)),
       m_RenderShader(m_Renderer.get()),
