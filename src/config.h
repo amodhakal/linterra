@@ -45,8 +45,6 @@ constexpr float FAR = 1000.0f;
 constexpr float DEFAULT_FOV = 45.0f;
 constexpr float DEFAULT_YAW = -90.0f;
 constexpr float DEFAULT_PITCH = 0.0f;
-// camera.cpp still spells DEAULT_PITCH; out of CQ edit scope — remove when updated.
-#define DEAULT_PITCH DEFAULT_PITCH
 
 constexpr float PITCH_MAX = 89.0f;
 constexpr float PITCH_MIN = -89.0f;
