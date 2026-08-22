@@ -38,7 +38,7 @@ glm::mat4 Camera::getView() {
 
 glm::mat4 Camera::getProjection() {
   return glm::perspective(glm::radians(m_Fov), m_Aspect,
-                          Constants::Camera::NEAR, Constants::Camera::FAR);
+                          m_Near, m_Far);
 }
 
 glm::vec3 Camera::getRight() const {
