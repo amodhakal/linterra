@@ -168,6 +168,8 @@ void Chunk::generateMesh() {
       return 0;
     case BlockType::DIRT:
       return 1;
+    case BlockType::WATER:
+      return 2;
     default:
       return 1;
     }
