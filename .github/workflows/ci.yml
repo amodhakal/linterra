@@ -21,7 +21,7 @@ jobs:
             cmake \
             clang \
             libgl1-mesa-dev \
-            libglfw3-dev \
+            libsdl3-dev \
             libglm-dev
 
       - name: Configure
