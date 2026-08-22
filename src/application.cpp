@@ -16,6 +16,26 @@
 #include "renderer/renderer.hpp"
 #include "shader.h"
 
+namespace {
+
+// Return a human-readable description for an OpenGL error code so logs
+// carry the full error information instead of just the numeric value.
+const char* describeGlError(std::uint32_t err) {
+  switch (err) {
+    case 0x0500: return "GL_INVALID_ENUM: an unacceptable value was specified for an enumerated argument";
+    case 0x0501: return "GL_INVALID_VALUE: a numeric argument is out of range";
+    case 0x0502: return "GL_INVALID_OPERATION: the specified operation is not allowed in the current state";
+    case 0x0503: return "GL_STACK_OVERFLOW: this command would cause a stack overflow";
+    case 0x0504: return "GL_STACK_UNDERFLOW: this command would cause a stack underflow";
+    case 0x0505: return "GL_OUT_OF_MEMORY: there is not enough memory left to execute the command";
+    case 0x0506: return "GL_INVALID_FRAMEBUFFER_OPERATION: the framebuffer object is not complete";
+    case 0x0507: return "GL_CONTEXT_LOST: the OpenGL context has been lost, due to a reset or driver failure";
+    default: return "unknown GL error";
+  }
+}
+
+}  // namespace
+
 Application::Application(const char* title, const uint width, const uint height,
                          glm::vec4 bgColor)
     : m_Renderer(createRenderer(RenderBackend::OpenGL)),
@@ -177,9 +197,14 @@ void Application::update() {
   m_Renderer->swapBuffers();
   m_Renderer->pollEvents();
 
-  std::uint32_t err = m_Renderer->getLastError();
-  if (err != 0) {
-    std::println("OpenGL Error: {}", err);
+  // Drain all pending OpenGL errors, printing each with a human-readable
+  // description so the numeric code alone doesn't have to be looked up.
+  for (int drained = 0; drained < 16; ++drained) {
+    std::uint32_t err = m_Renderer->getLastError();
+    if (err == 0) {
+      break;
+    }
+    std::println("OpenGL Error: {} ({:#06x})", describeGlError(err), err);
   }
 
   glm::vec3 cameraPosition = m_Player.getCamera()->m_Position;
