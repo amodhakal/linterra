@@ -24,12 +24,12 @@ Frustum::Frustum(const Camera *camera) {
       glm::cross(frontMultFar + camera->m_Up * halfVSide, camera->getRight())};
 }
 
-bool Frustum::isChunkInside(const glm::vec2 &position) {
+bool Frustum::isChunkInside(const glm::ivec2 &position) {
   glm::vec3 chunkCorner1 = {
-      static_cast<float>((position.s * Constants::Chunk::LENGTH) -
+      static_cast<float>((position.x * Constants::Chunk::LENGTH) -
                          (Constants::Chunk::LENGTH / 2.0)),
       0.0,
-      static_cast<float>((position.t * Constants::Chunk::LENGTH) -
+      static_cast<float>((position.y * Constants::Chunk::LENGTH) -
                          (Constants::Chunk::LENGTH / 2.0))};
   glm::vec3 chunkCorner2 = {chunkCorner1.x + Constants::Chunk::LENGTH,
                             Constants::Chunk::HEIGHT,

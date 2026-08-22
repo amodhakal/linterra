@@ -69,12 +69,14 @@ Chunk &Chunk::operator=(Chunk &&other) noexcept {
 
 Chunk::~Chunk() { cleanup(); }
 
-void Chunk::generateHeightMapGPU(const glm::vec2 &position,
+void Chunk::generateHeightMapGPU(const glm::ivec2 &position,
                                   Shader &computeShader, IBuffer &ssbo) {
   // Dispatch the compute shader to fill the SSBO with height values.
   // The SSBO is already bound at binding point 0 by the caller.
   computeShader.use();
-  computeShader.setUniformVec2("uChunkPos", position);
+  computeShader.setUniformVec2(
+      "uChunkPos",
+      glm::vec2(static_cast<float>(position.x), static_cast<float>(position.y)));
   computeShader.setUniformFloat("uFrequency",
                                  Constants::Noise::FREQUENCY);
   computeShader.setUniformUInt("uMaxHeight",
@@ -113,14 +115,14 @@ void Chunk::generateHeightMapGPU(const glm::vec2 &position,
   }
 }
 
-void Chunk::generateMeshData(const glm::vec2 &position) {
+void Chunk::generateMeshData(const glm::ivec2 &position) {
   generateHeightMapCPU(position);
   generateMesh();
 }
 
-void Chunk::generateHeightMapCPU(const glm::vec2 &position) {
-  const float baseX = position.s * static_cast<float>(Constants::Chunk::LENGTH);
-  const float baseZ = position.t * static_cast<float>(Constants::Chunk::LENGTH);
+void Chunk::generateHeightMapCPU(const glm::ivec2 &position) {
+  const float baseX = static_cast<float>(position.x) * static_cast<float>(Constants::Chunk::LENGTH);
+  const float baseZ = static_cast<float>(position.y) * static_cast<float>(Constants::Chunk::LENGTH);
 
   auto sampleGrassHeightWorld = [&](float worldBlockX, float worldBlockZ) -> uint16_t {
     auto n = Noise::fbm(

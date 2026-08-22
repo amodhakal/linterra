@@ -48,8 +48,8 @@ public:
   Chunk(Chunk &&other) noexcept;
   Chunk &operator=(Chunk &&other) noexcept;
 
-  void generateMeshData(const glm::vec2 &position);
-  void generateHeightMapCPU(const glm::vec2 &position);
+  void generateMeshData(const glm::ivec2 &position);
+  void generateHeightMapCPU(const glm::ivec2 &position);
   void generateMesh();
 
   /** GPU-accelerated heightmap generation via compute shader + SSBO.
@@ -57,7 +57,7 @@ public:
    *  the terrain compute shader into the provided SSBO. The caller must
    *  have already bound the SSBO at binding point 0 and loaded the compute
    *  shader uniforms. */
-  void generateHeightMapGPU(const glm::vec2 &position, Shader &computeShader,
+  void generateHeightMapGPU(const glm::ivec2 &position, Shader &computeShader,
                             IBuffer &ssbo);
 
   void pass();

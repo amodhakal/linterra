@@ -4,7 +4,7 @@
 class Frustum {
  public:
   Frustum(const Camera *camera);
-  bool isChunkInside(const glm::vec2 &position);
+  bool isChunkInside(const glm::ivec2 &position);
 
   Plane m_NearFace;
   Plane m_FarFace;
