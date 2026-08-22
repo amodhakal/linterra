@@ -248,16 +248,17 @@ The initial milestone focused on building the foundation required for an infinit
 ## Technical Stack
 
 - **Language:** C++23
-- **Graphics:** OpenGL 3.3+ (via an `IRenderer` abstraction layer)
+- **Graphics:** OpenGL 3.3+ on Apple / non-GPU-noise platforms; OpenGL 4.3+ elsewhere (GPU compute terrain path). Rendering goes through an `IRenderer` abstraction layer (`src/renderer/`) with an OpenGL backend in `src/renderer/opengl/`.
 - **Libraries:**
   - **GLFW** — windowing & input
   - **GLAD** — OpenGL function loading (vendored)
   - **GLM** — mathematical foundations (matrices, vectors)
-  - **SDL3** — platform layer used by the CMake build
   - **Dear ImGui** — debug UI (vendored)
   - **stb_image** — texture loading (vendored)
   - **FastNoise-style noise** — procedural terrain (vendored)
   - **doctest** — unit testing (vendored)
+
+> Note: SDL3 appears in some historical build configs but the current codebase is GLFW-only — the windowing backend lives entirely in the OpenGL renderer (`glfwInit`, `ImGui_ImplGlfw_InitForOpenGL`).
 
 ---
 
@@ -273,18 +274,20 @@ The initial milestone focused on building the foundation required for an infinit
 **macOS (Homebrew):**
 
 ```bash
-brew install sdl3 glfw glm
+brew install glfw glm
 ```
 
 **Linux (Debian/Ubuntu):**
 
 ```bash
-sudo apt install libsdl3-dev libglfw3-dev libglm-dev
+sudo apt install libglfw3-dev libglm-dev
 ```
 
 **Windows:**
 
-- Install via vcpkg: `vcpkg install sdl3 glfw3 glm`
+- Install via vcpkg: `vcpkg install glfw3 glm`
+
+> ⚠️ Known issue: as of this writing, `main`'s `CMakeLists.txt` still compiles `imgui_impl_sdl3.cpp` and links SDL3 while `src/application.cpp` uses the ImGui GLFW backend. Until that mismatch is fixed upstream, building the game target requires either installing SDL3 or adjusting those two CMake entries. The `linterra_tests` target is unaffected and builds headlessly. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev workflow details.
 
 ### Build
 
