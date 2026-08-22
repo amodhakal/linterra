@@ -4,7 +4,7 @@
 
 Linterra is a from-scratch, Minecraft-style voxel engine written in modern C++ and OpenGL. This project is an ongoing exploration into building a voxel engine from scratch. It is not a playable game yet; the focus so far has been designing the underlying systems that make an infinite, block-based world possible.
 
-![Screenshot of the game](/docs//screenshot.png)
+![Screenshot of the game](docs/screenshot.png)
 
 ## Implemented Features
 
@@ -248,11 +248,16 @@ The initial milestone focused on building the foundation required for an infinit
 ## Technical Stack
 
 - **Language:** C++23
-- **Graphics:** OpenGL 3.3+
+- **Graphics:** OpenGL 3.3+ (via an `IRenderer` abstraction layer)
 - **Libraries:**
   - **GLFW** — windowing & input
-  - **GLAD** — OpenGL function loading
+  - **GLAD** — OpenGL function loading (vendored)
   - **GLM** — mathematical foundations (matrices, vectors)
+  - **SDL3** — platform layer used by the CMake build
+  - **Dear ImGui** — debug UI (vendored)
+  - **stb_image** — texture loading (vendored)
+  - **FastNoise-style noise** — procedural terrain (vendored)
+  - **doctest** — unit testing (vendored)
 
 ---
 
@@ -261,39 +266,48 @@ The initial milestone focused on building the foundation required for an infinit
 ### Prerequisites
 
 - macOS 12+ / Linux / Windows 10+
-- C++20/23-capable compiler (Clang, GCC, or MSVC)
-- CMake 3.15+
+- C++23-capable compiler (Clang, GCC, or MSVC)
+- CMake 3.16+
+- [just](https://github.com/casey/just) (optional — convenience recipes)
 
 **macOS (Homebrew):**
 
 ```bash
-brew install glfw glm
+brew install sdl3 glfw glm
 ```
 
 **Linux (Debian/Ubuntu):**
 
 ```bash
-sudo apt install libglfw3-dev libglm-dev
+sudo apt install libsdl3-dev libglfw3-dev libglm-dev
 ```
 
 **Windows:**
 
-- Install via vcpkg: `vcpkg install glfw3 glm`
+- Install via vcpkg: `vcpkg install sdl3 glfw3 glm`
 
 ### Build
+
+With CMake directly:
 
 ```bash
 git clone https://github.com/amodhakal/linterra.git
 cd linterra
-mkdir build && cd build
-cmake ..
-make
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+Or with `just` (see `justfile` for all recipes):
+
+```bash
+just build    # release build
+just dev      # debug build with sanitizers
 ```
 
 ### Run
 
 ```bash
-./linterra
+./build/linterra
 ```
 
 ### Unit Tests
@@ -305,19 +319,25 @@ runtime), so it can run in headless CI.
 
 ```bash
 # configure + build everything (tests are ON by default)
-mkdir build && cd build
-cmake ..
-make
+cmake -S . -B build
+cmake --build build
 
-# run the suite directly, or via ctest
-./linterra_tests
-ctest --output-on-failure
+# build + run the suite directly, or via ctest
+cmake --build build --target linterra_tests
+./build/linterra_tests
+ctest --test-dir build --output-on-failure
+```
+
+Or simply:
+
+```bash
+just test
 ```
 
 To omit the test target (e.g. when only building the game):
 
 ```bash
-cmake -DBUILD_TESTS=OFF ..
+cmake -S . -B build -DBUILD_TESTS=OFF
 ```
 
 The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
