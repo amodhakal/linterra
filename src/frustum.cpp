@@ -3,7 +3,8 @@
 #include "config.h"
 
 Frustum::Frustum(const Camera *camera) {
-  float halfVSide = camera->m_Far * tan(camera->m_Fov * 0.5);
+  float halfVSide =
+      camera->m_Far * tan(glm::radians(camera->m_Fov) * 0.5f);
   float halfHSide = halfVSide * camera->m_Aspect;
   const glm::vec3 frontMultFar = camera->m_Far * camera->m_Front;
 
