@@ -130,18 +130,31 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       }
 
       TaskResult &result = *resultPtr;
+      bool enqueued = false;
+      // Cap the number of pending generation tasks so a single frame
+      // can't flood the pool (thundering herd). Rejected chunks are rolled
+      // back from the pending bookkeeping so they are retried on a later
+      // frame once the queue drains.
+      constexpr std::size_t kMaxPendingTasks =
+          static_cast<std::size_t>(Constants::Chunk::MAX_GENERATION_THREADS);
       if (Constants::Noise::USE_GPU && m_HeightMapSSBO && m_ComputeShader.getId() != 0) {
         m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
         result.chunk.generateHeightMapGPU(position, m_ComputeShader, *m_HeightMapSSBO);
-        m_ThreadPool.enqueue([&result]() {
+        enqueued = m_ThreadPool.tryEnqueue([&result]() {
           result.chunk.generateMesh();
           result.uploadReady.store(true, std::memory_order_release);
-        });
+        }, kMaxPendingTasks);
       } else {
-        m_ThreadPool.enqueue([&result, position]() {
+        enqueued = m_ThreadPool.tryEnqueue([&result, position]() {
           result.chunk.generateMeshData(position);
           result.uploadReady.store(true, std::memory_order_release);
-        });
+        }, kMaxPendingTasks);
+      }
+
+      if (!enqueued) {
+        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+        m_ProcessingPositions.erase(position);
+        m_ProcessingChunks.erase(position);
       }
     }
   }
