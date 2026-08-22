@@ -194,6 +194,14 @@ void Application::update() {
 
 float Application::getDeltaTime() {
   float currentFrame = m_Renderer->getTimeSeconds();
+  if (m_firstFrame) {
+    // The clock has been running since renderer init, so the raw delta on the
+    // first frame is huge and would teleport the player. Treat the first
+    // frame as a zero-length step instead.
+    m_firstFrame = false;
+    m_lastFrame = currentFrame;
+    return 0.0f;
+  }
   float deltaTime = currentFrame - m_lastFrame;
   m_lastFrame = currentFrame;
 
