@@ -14,8 +14,8 @@ class IRenderer;
 
 class Application {
  public:
-  Application(const char* title, const uint width = Constants::SCR_WIDTH,
-              const uint height = Constants::SCR_HEIGHT,
+  Application(const char* title, const std::uint32_t width = Constants::SCR_WIDTH,
+              const std::uint32_t height = Constants::SCR_HEIGHT,
               glm::vec4 bgColor = Constants::BG_COLOR);
   ~Application();
 
