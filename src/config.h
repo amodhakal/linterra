@@ -6,7 +6,7 @@
 #if !defined(LINTERRA_NO_OPENGL)
 #define GL_SILENCE_DEPRECATION
 #include <glad/glad.h>
-#include <glfw/glfw3.h>
+#include <GLFW/glfw3.h>
 #endif
 
 #include <cstdint>
