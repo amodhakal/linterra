@@ -162,7 +162,9 @@ void Application::update() {
   ImGui::Begin("Debug Info", nullptr,
                ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
-  ImGui::Text("FPS: %.1f (%.3f ms)", io.Framerate, 1000.0f / io.Framerate);
+  const float fps = io.Framerate;
+  const float ms_per_frame = (fps > 0.0f) ? (1000.0f / fps) : 0.0f;
+  ImGui::Text("FPS: %.1f (%.3f ms)", fps, ms_per_frame);
   if (auto cam = m_Player.getCamera()) {
     ImGui::Text("Pos: X: %.2f Y: %.2f Z: %.2f", cam->m_Position.x, cam->m_Position.y, cam->m_Position.z);
     ImGui::Text("Dir: X: %.2f Y: %.2f Z: %.2f", cam->m_Front.x, cam->m_Front.y, cam->m_Front.z);
