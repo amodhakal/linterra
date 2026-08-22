@@ -24,14 +24,14 @@ Frustum::Frustum(const Camera *camera) {
       glm::cross(frontMultFar + camera->m_Up * halfVSide, camera->getRight())};
 }
 
-bool Frustum::isChunkInside(const glm::vec2 &position) {
+bool Frustum::isChunkInside(const glm::ivec2 &position) {
   // Chunk geometry occupies [pos*L, pos*L+L] in X/Z (see ChunkManager::render's
   // model translation and chunk.cpp's local block coordinates). The box must
   // match that exactly; previously it was offset by -L/2 (half a chunk).
   glm::vec3 chunkCorner1 = {
-      static_cast<float>(position.s * Constants::Chunk::LENGTH),
+      static_cast<float>(position.x * Constants::Chunk::LENGTH),
       0.0,
-      static_cast<float>(position.t * Constants::Chunk::LENGTH)};
+      static_cast<float>(position.y * Constants::Chunk::LENGTH)};
   glm::vec3 chunkCorner2 = {chunkCorner1.x + Constants::Chunk::LENGTH,
                             Constants::Chunk::HEIGHT,
                             chunkCorner1.z + Constants::Chunk::LENGTH};

@@ -29,7 +29,7 @@ constexpr float kChunkCenterOffset = kChunkBlockExtent * 0.5f;
 ChunkManager::ChunkManager(IRenderer* renderer)
     : m_Renderer(renderer), m_ComputeShader(renderer) {}
 
-float ChunkManager::getChunkDistanceSquared(const glm::vec2 &chunkPos,
+float ChunkManager::getChunkDistanceSquared(const glm::ivec2 &chunkPos,
                                             const glm::vec3 &cameraPos) {
   const float chunkCenterX = chunkPos.s * kChunkBlockExtent + kChunkCenterOffset;
   const float chunkCenterZ = chunkPos.t * kChunkBlockExtent + kChunkCenterOffset;
@@ -69,7 +69,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
   const float renderDistSq = renderDistBlocks * renderDistBlocks;
 
   for (auto it = m_ProcessedChunks.begin(); it != m_ProcessedChunks.end();) {
-    const glm::vec2 &position = it->first;
+    const glm::ivec2 &position = it->first;
 
     if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
       it->second.cleanup();
@@ -88,7 +88,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       continue;
     }
 
-    const glm::vec2 position = it->first;
+    const glm::ivec2 position = it->first;
     result.chunk.pass();
     Chunk promoted = std::move(result.chunk);
 
@@ -112,8 +112,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     for (int32_t chunkZ = currentChunkZ - Constants::Chunk::RENDER_DISTANCE_CHUNKS;
          chunkZ <= currentChunkZ + Constants::Chunk::RENDER_DISTANCE_CHUNKS;
          chunkZ++) {
-      const glm::vec2 position = {static_cast<float>(chunkX),
-                                  static_cast<float>(chunkZ)};
+      const glm::ivec2 position = {chunkX, chunkZ};
 
       if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
         continue;
@@ -154,7 +153,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
   Frustum frustum(camera);
 
   for (auto &value : m_ProcessedChunks) {
-    const glm::vec2 &position = value.first;
+    const glm::ivec2 &position = value.first;
 
     if (!frustum.isChunkInside(position)) {
       continue;
@@ -183,7 +182,7 @@ float ChunkManager::getPositionHighestY(const glm::vec3 &cameraPosition) {
   const int32_t chunkZ = static_cast<int32_t>(
       std::floor((cameraPosition.z + kChunkCenterOffset) / kChunkBlockExtent));
 
-  const glm::vec2 chunkPosition = {static_cast<float>(chunkX),
+  const glm::ivec2 chunkPosition = {static_cast<float>(chunkX),
                                    static_cast<float>(chunkZ)};
 
   const int32_t worldX = static_cast<int32_t>(std::floor(cameraPosition.x));
