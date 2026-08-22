@@ -4,3 +4,5 @@
 /cmake-build-minsizerel
 /cmake-build-release
 /cmake-build-relwithdebinfo
+
+.DS_Store
