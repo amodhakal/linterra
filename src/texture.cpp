@@ -64,8 +64,32 @@ void Texture::loadFromFiles(const std::vector<std::string>& paths) {
     heights.push_back(height);
   }
 
+  // Validate texture array inputs: differing image sizes would corrupt the
+  // array, and non-power-of-two textures combined with GL_REPEAT cause seams.
   m_Width = widths[static_cast<size_t>(0)];
   m_Height = heights[static_cast<size_t>(0)];
+  for (size_t i = 1; i < paths.size(); ++i) {
+    if (widths[i] != m_Width || heights[i] != m_Height) {
+      for (auto* img : images) {
+        stbi_image_free(img);
+      }
+      throw std::runtime_error(
+          std::string("Texture size mismatch for '") + paths[i] + "': got " +
+          std::to_string(widths[i]) + "x" + std::to_string(heights[i]) +
+          ", expected " + std::to_string(m_Width) + "x" +
+          std::to_string(m_Height));
+    }
+  }
+  if ((m_Width & (m_Width - 1)) != 0 || (m_Height & (m_Height - 1)) != 0) {
+    for (auto* img : images) {
+      stbi_image_free(img);
+    }
+    throw std::runtime_error(
+        "Texture dimensions must be power-of-two for GL_REPEAT wrapping "
+        "(got " + std::to_string(m_Width) + "x" + std::to_string(m_Height) +
+        ")");
+  }
+
   m_Layers = static_cast<std::int32_t>(paths.size());
 
   m_Texture = m_Renderer->createTexture(TextureType::Texture2DArray);
