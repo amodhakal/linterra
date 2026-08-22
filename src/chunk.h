@@ -53,13 +53,22 @@ public:
   void generateHeightMapCPU(const glm::ivec2 &position);
   void generateMesh();
 
-  /** GPU-accelerated heightmap generation via compute shader + SSBO.
-   *  Writes the extended heightmap into m_ExtendedHeightMap by dispatching
-   *  the terrain compute shader into the provided SSBO. The caller must
-   *  have already bound the SSBO at binding point 0 and loaded the compute
-   *  shader uniforms. */
-  void generateHeightMapGPU(const glm::ivec2 &position, Shader &computeShader,
-                            IBuffer &ssbo);
+  /**
+   * Stage 1 of the GPU path: dispatch the compute shader into the chunk's
+   * slot of the batched SSBO. Does NOT read back — the caller must call
+   * finishHeightMapGPU() for this chunk later (deferred, after the GPU has
+   * had time to run) before using the height maps.
+   */
+  void generateHeightMapGPU(const glm::vec2 &position, uint32_t slotOffset,
+                            Shader &computeShader);
+
+  /** Stage 2 of the GPU path: read back the SSBO slot into the height maps.
+   *  Must be called on the GL thread after generateHeightMapGPU(), ideally
+   *  deferred by at least one frame so the GPU runs asynchronously. */
+  void finishHeightMapGPU(uint32_t slotOffset, IBuffer &ssbo);
+
+  /** True once the heightmap data has been read back from the GPU. */
+  bool isGpuHeightMapReady() const { return m_GpuHeightMapReady; }
 
   void pass();
   void render();
@@ -94,4 +103,7 @@ private:
 
   /** Halo for neighbor lookups: local block (lx,lz) in [-1, LENGTH] maps to [(uint32_t)lx + 1]. */
   uint16_t m_ExtendedHeightMap[kExtSide][kExtSide];
+
+  /** True after the deferred GPU readback has filled the height maps. */
+  bool m_GpuHeightMapReady = false;
 };

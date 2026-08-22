@@ -52,7 +52,10 @@ void ChunkManager::load() {
       m_ComputeShader.newUniform("uLacunarity");
 
       size_t kExtSide = Chunk::kExtSide;
-      size_t ssboSize = kExtSide * kExtSide * sizeof(uint32_t);
+      // One slot per in-flight chunk so multiple compute dispatches can be
+      // batched before a single deferred readback pass.
+      size_t ssboSize = static_cast<size_t>(kGpuSlots) * kExtSide * kExtSide *
+                        sizeof(uint32_t);
       m_HeightMapSSBO = m_Renderer->createBuffer(BufferType::Storage);
       m_Renderer->setBufferData(*m_HeightMapSSBO, nullptr, ssboSize, BufferUsage::Dynamic);
     } catch (const std::exception& e) {
@@ -82,6 +85,23 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
 
   for (auto it = m_ProcessingChunks.begin(); it != m_ProcessingChunks.end();) {
     TaskResult &result = it->second;
+
+    // GPU path: the meshing task only flags meshReady. Before promoting,
+    // finish the deferred heightmap readback for this chunk's SSBO slot.
+    // By now the compute dispatch is at least a frame old, so the GPU has
+    // almost always finished and the readback doesn't stall the pipeline.
+    if (Constants::Noise::USE_GPU && m_HeightMapSSBO &&
+        m_ComputeShader.getId() != 0) {
+      if (!result.meshReady.load(std::memory_order_acquire)) {
+        ++it;
+        continue;
+      }
+      if (!result.chunk.isGpuHeightMapReady()) {
+        m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
+        result.chunk.finishHeightMapGPU(result.slot, *m_HeightMapSSBO);
+        result.chunk.generateMesh();
+      }
+    }
 
     if (!result.uploadReady.load(std::memory_order_acquire)) {
       ++it;
@@ -144,18 +164,34 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       }
 
       TaskResult &result = *resultPtr;
+      bool enqueued = false;
       if (Constants::Noise::USE_GPU && m_HeightMapSSBO && m_ComputeShader.getId() != 0) {
+        // Batched GPU path: dispatch into this chunk's slot of the shared
+        // SSBO and defer both meshing and readback. The main thread never
+        // blocks on a per-chunk GPU sync here; the readback happens later,
+        // once the slot has been given a full frame to complete.
+        const uint32_t slot = m_NextGpuSlot++ % kGpuSlots;
+        result.slot = slot;
         m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
-        result.chunk.generateHeightMapGPU(position, m_ComputeShader, *m_HeightMapSSBO);
-        m_ThreadPool.enqueue([&result]() {
-          result.chunk.generateMesh();
-          result.uploadReady.store(true, std::memory_order_release);
-        });
+        result.chunk.generateHeightMapGPU(position, slot, m_ComputeShader);
+        constexpr std::size_t kMaxPendingTasks =
+            static_cast<std::size_t>(Constants::Chunk::MAX_GENERATION_THREADS);
+        enqueued = m_ThreadPool.tryEnqueue([&result]() {
+          result.meshReady.store(true, std::memory_order_release);
+        }, kMaxPendingTasks);
       } else {
-        m_ThreadPool.enqueue([&result, position]() {
+        constexpr std::size_t kMaxPendingTasks =
+            static_cast<std::size_t>(Constants::Chunk::MAX_GENERATION_THREADS);
+        enqueued = m_ThreadPool.tryEnqueue([&result, position]() {
           result.chunk.generateMeshData(position);
           result.uploadReady.store(true, std::memory_order_release);
-        });
+        }, kMaxPendingTasks);
+      }
+
+      if (!enqueued) {
+        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+        m_ProcessingPositions.erase(position);
+        m_ProcessingChunks.erase(position);
       }
     }
   }
