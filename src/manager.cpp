@@ -19,6 +19,10 @@ namespace {
 constexpr float kChunkBlockExtent =
     static_cast<float>(Constants::Chunk::LENGTH);
 constexpr float kChunkCenterOffset = kChunkBlockExtent * 0.5f;
+// Chunk meshes are drawn with vertices in [pos*L, pos*L+L] (see
+// ChunkManager::render's model translation and chunk.cpp's local block coords),
+// so the true chunk center is pos*L + L/2, not pos*L - L/2.
+
 
 } // namespace
 
@@ -27,8 +31,8 @@ ChunkManager::ChunkManager(IRenderer* renderer)
 
 float ChunkManager::getChunkDistanceSquared(const glm::ivec2 &chunkPos,
                                             const glm::vec3 &cameraPos) {
-  const float chunkCenterX = static_cast<float>(chunkPos.x) * kChunkBlockExtent - kChunkCenterOffset;
-  const float chunkCenterZ = static_cast<float>(chunkPos.y) * kChunkBlockExtent - kChunkCenterOffset;
+  const float chunkCenterX = chunkPos.s * kChunkBlockExtent + kChunkCenterOffset;
+  const float chunkCenterZ = chunkPos.t * kChunkBlockExtent + kChunkCenterOffset;
   const float dx = chunkCenterX - cameraPos.x;
   const float dz = chunkCenterZ - cameraPos.z;
   return dx * dx + dz * dz;
@@ -65,7 +69,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
   const float renderDistSq = renderDistBlocks * renderDistBlocks;
 
   for (auto it = m_ProcessedChunks.begin(); it != m_ProcessedChunks.end();) {
-    const glm::ivec2 position = it->first;
+    const glm::ivec2 &position = it->first;
 
     if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
       it->second.cleanup();
@@ -140,31 +144,18 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       }
 
       TaskResult &result = *resultPtr;
-      bool enqueued = false;
-      // Cap the number of pending generation tasks so a single frame
-      // can't flood the pool (thundering herd). Rejected chunks are rolled
-      // back from the pending bookkeeping so they are retried on a later
-      // frame once the queue drains.
-      constexpr std::size_t kMaxPendingTasks =
-          static_cast<std::size_t>(Constants::Chunk::MAX_GENERATION_THREADS);
       if (Constants::Noise::USE_GPU && m_HeightMapSSBO && m_ComputeShader.getId() != 0) {
         m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
         result.chunk.generateHeightMapGPU(position, m_ComputeShader, *m_HeightMapSSBO);
-        enqueued = m_ThreadPool.tryEnqueue([&result]() {
+        m_ThreadPool.enqueue([&result]() {
           result.chunk.generateMesh();
           result.uploadReady.store(true, std::memory_order_release);
-        }, kMaxPendingTasks);
+        });
       } else {
-        enqueued = m_ThreadPool.tryEnqueue([&result, position]() {
+        m_ThreadPool.enqueue([&result, position]() {
           result.chunk.generateMeshData(position);
           result.uploadReady.store(true, std::memory_order_release);
-        }, kMaxPendingTasks);
-      }
-
-      if (!enqueued) {
-        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
-        m_ProcessingPositions.erase(position);
-        m_ProcessingChunks.erase(position);
+        });
       }
     }
   }
@@ -184,9 +175,9 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     glm::mat4 model = glm::mat4(1.0f);
     model = glm::translate(
         model,
-        glm::vec3(static_cast<float>(position.x * Constants::Chunk::LENGTH),
+        glm::vec3(static_cast<float>(position.s * Constants::Chunk::LENGTH),
                   0.0f,
-                  static_cast<float>(position.y * Constants::Chunk::LENGTH)));
+                  static_cast<float>(position.t * Constants::Chunk::LENGTH)));
 
     // Terrain pass: scene shader draws both the terrain and the (blue)
     // water surface, which is folded into the same mesh.
@@ -202,7 +193,8 @@ float ChunkManager::getPositionHighestY(const glm::vec3 &cameraPosition) {
   const int32_t chunkZ = static_cast<int32_t>(
       std::floor((cameraPosition.z + kChunkCenterOffset) / kChunkBlockExtent));
 
-  const glm::ivec2 chunkPosition = {chunkX, chunkZ};
+  const glm::ivec2 chunkPosition = {static_cast<float>(chunkX),
+                                   static_cast<float>(chunkZ)};
 
   const int32_t worldX = static_cast<int32_t>(std::floor(cameraPosition.x));
   const int32_t worldZ = static_cast<int32_t>(std::floor(cameraPosition.z));

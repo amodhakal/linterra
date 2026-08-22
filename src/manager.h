@@ -72,8 +72,8 @@ public:
   float getPositionHighestY(const glm::vec3 &cameraPosition);
 
 private:
-  static float getChunkDistanceSquared(const glm::vec2 &chunkPos,
-                                      const glm::vec3 &cameraPos);
+  static float getChunkDistanceSquared(const glm::ivec2 &chunkPos,
+                                       const glm::vec3 &cameraPos);
 
   IRenderer* m_Renderer = nullptr;
   std::unique_ptr<IBuffer> m_HeightMapSSBO;

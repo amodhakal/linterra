@@ -3,8 +3,7 @@
 #include "config.h"
 
 Frustum::Frustum(const Camera *camera) {
-  float halfVSide =
-      camera->m_Far * tan(glm::radians(camera->m_Fov) * 0.5f);
+  float halfVSide = camera->m_Far * tan(camera->m_Fov * 0.5);
   float halfHSide = halfVSide * camera->m_Aspect;
   const glm::vec3 frontMultFar = camera->m_Far * camera->m_Front;
 
@@ -26,12 +25,13 @@ Frustum::Frustum(const Camera *camera) {
 }
 
 bool Frustum::isChunkInside(const glm::ivec2 &position) {
+  // Chunk geometry occupies [pos*L, pos*L+L] in X/Z (see ChunkManager::render's
+  // model translation and chunk.cpp's local block coordinates). The box must
+  // match that exactly; previously it was offset by -L/2 (half a chunk).
   glm::vec3 chunkCorner1 = {
-      static_cast<float>((position.x * Constants::Chunk::LENGTH) -
-                         (Constants::Chunk::LENGTH / 2.0)),
+      static_cast<float>(position.x * Constants::Chunk::LENGTH),
       0.0,
-      static_cast<float>((position.y * Constants::Chunk::LENGTH) -
-                         (Constants::Chunk::LENGTH / 2.0))};
+      static_cast<float>(position.y * Constants::Chunk::LENGTH)};
   glm::vec3 chunkCorner2 = {chunkCorner1.x + Constants::Chunk::LENGTH,
                             Constants::Chunk::HEIGHT,
                             chunkCorner1.z + Constants::Chunk::LENGTH};
