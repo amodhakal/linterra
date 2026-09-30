@@ -261,6 +261,23 @@ int main() {
       const GLenum target = textureTypeToGL(type);
       const GLint sentinel = GL_CLAMP_TO_EDGE;
 
+      // glGenerateMipmap is only legal on a texture that has storage, and it is
+      // an error if the levels do not form a complete chain down from level 0.
+      // So the base level is allocated first -- otherwise the call below is
+      // correctly rejected with GL_INVALID_OPERATION and the check would be
+      // measuring the missing allocation rather than the target.
+      if (type == TextureType::Texture2DArray) {
+        renderer->setTextureImage2DArray(*texture, 8, 8, 2, nullptr);
+      } else {
+        // There is no IRenderer entry point for a plain 2D image, and this
+        // check is about the target generateMipmap names, so allocate directly.
+        texture->bind(0);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA,
+                     GL_UNSIGNED_BYTE, nullptr);
+      }
+      ReportGlErrors(
+          (std::string("texture storage allocated: ") + label).c_str());
+
       // Set through the renderer, then read back through GL from the texture's
       // own target. If the renderer named the wrong target, the write landed
       // elsewhere and the texture keeps its default of GL_REPEAT.
