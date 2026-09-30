@@ -140,9 +140,8 @@ just fmt          # rewrite in place
 just fmt-check    # verify only, non-zero exit if unformatted
 ```
 
-`.clang-tidy` is **not** configured yet — `just tidy` currently runs
-clang-tidy's default check set rather than a curated one. Two lint entry
-points exist:
+`.clang-tidy` is checked in and declares the project's naming convention, so
+the linter enforces it on new code. Two lint entry points exist:
 
 ```bash
 just tidy         # run clang-tidy over an existing build tree
@@ -150,8 +149,13 @@ just tidy-build   # lint by building with CMAKE_CXX_CLANG_TIDY
 ```
 
 `just tidy` reads the `compile_commands.json` that CMake emits by default, so
-it lints with the same flags your editor's language server uses. Until a config
-is committed, expect the default checks to be noisier than they need to be.
+it lints with the same flags your editor's language server uses.
+
+clang-tidy is advisory — nothing in CI runs it, and it is not a merge gate. The
+naming rules are calibrated to what the tree already does, but the check set is
+`bugprone-*` and `performance-*` with the defaults, so a first run over the
+existing code may surface findings that are not yours. Fix what is worth
+fixing; do not reformat the tree to satisfy a linter in passing.
 
 Compiler warnings are enabled for all first-party code via the
 `linterra_warnings` target (`-Wall -Wextra -Wpedantic -Wshadow`, `/W4` on

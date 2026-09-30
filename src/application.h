@@ -32,8 +32,8 @@ class Application {
   Texture m_TextureArray;
 
   glm::vec4 m_BgColor;
-  float m_lastFrame;
-  bool m_firstFrame = true;  // skip the first-frame deltaTime (clock started at init)
+  float m_LastFrame;
+  bool m_FirstFrame = true;  // skip the first-frame deltaTime (clock started at init)
 
   std::uint32_t m_FrameWidth;   // drawing-buffer size (pixels, may differ from
   std::uint32_t m_FrameHeight;  // window logical size on HiDPI displays)

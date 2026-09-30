@@ -25,7 +25,7 @@ Application::Application(const char* title, const std::uint32_t width, const std
       m_Player(Constants::Camera::DEFAULT_POSITION),
       m_TextureArray(m_Renderer.get()),
       m_BgColor(bgColor),
-      m_lastFrame(0)
+      m_LastFrame(0)
 
 {
   m_Renderer->initializeWindowing();
@@ -193,16 +193,16 @@ void Application::update() {
 
 float Application::getDeltaTime() {
   float currentFrame = m_Renderer->getTimeSeconds();
-  if (m_firstFrame) {
+  if (m_FirstFrame) {
     // The clock has been running since renderer init, so the raw delta on the
     // first frame is huge and would teleport the player. Treat the first
     // frame as a zero-length step instead.
-    m_firstFrame = false;
-    m_lastFrame = currentFrame;
+    m_FirstFrame = false;
+    m_LastFrame = currentFrame;
     return 0.0f;
   }
-  float deltaTime = currentFrame - m_lastFrame;
-  m_lastFrame = currentFrame;
+  float deltaTime = currentFrame - m_LastFrame;
+  m_LastFrame = currentFrame;
 
   return deltaTime;
 }
