@@ -1,5 +1,7 @@
 #include "opengl_renderer.hpp"
 
+#include "gl_texture_type.hpp"
+
 #include <glad/glad.h>
 #include "config.h"
 #include "opengl_buffer.hpp"
@@ -115,7 +117,10 @@ std::unique_ptr<ITexture> OpenGLRenderer::createTexture(TextureType type) {
 void OpenGLRenderer::setTextureParameter(ITexture& texture, int pname,
                                         int value) {
   texture.bind(0);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, pname, value);
+  // Target comes from the texture, not a hardcoded 2D_ARRAY: glTexParameteri
+  // applies to whichever target is named, so naming the wrong one configures a
+  // texture that is not the one being set up.
+  glTexParameteri(textureTypeToGL(texture.getType()), pname, value);
 }
 
 void OpenGLRenderer::setTextureImage2DArray(ITexture& texture, int width,
@@ -128,7 +133,7 @@ void OpenGLRenderer::setTextureImage2DArray(ITexture& texture, int width,
 
 void OpenGLRenderer::generateMipmaps(ITexture& texture) {
   texture.bind(0);
-  glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+  glGenerateMipmap(textureTypeToGL(texture.getType()));
 }
 
 void OpenGLRenderer::draw(PrimitiveType type, size_t count, size_t offset) {

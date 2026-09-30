@@ -2,8 +2,11 @@
 
 #include <glad/glad.h>
 
-namespace {
+#include "gl_texture_type.hpp"
 
+// Defined here rather than in the header so the GL headers stay out of
+// translation units that only need the declaration. Shared with
+// OpenGLRenderer, which needs the same mapping.
 GLenum textureTypeToGL(TextureType type) {
   switch (type) {
     case TextureType::Texture2D:
@@ -17,8 +20,6 @@ GLenum textureTypeToGL(TextureType type) {
   }
   return GL_TEXTURE_2D;
 }
-
-}  // namespace
 
 OpenGLTexture::OpenGLTexture(TextureType type) : m_Type(type) {
   glGenTextures(1, &m_Id);
