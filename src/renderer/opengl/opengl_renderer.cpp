@@ -1,6 +1,7 @@
 #include "opengl_renderer.hpp"
 
 #include <glad/glad.h>
+#include "config.h"
 #include "opengl_buffer.hpp"
 #include "opengl_shader.hpp"
 #include "opengl_texture.hpp"
