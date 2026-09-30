@@ -64,15 +64,57 @@ find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(glm REQUIRED)
 
+# ---------------------------------------------------------------------------
+# linterra_core — the GL-free half of the engine
+#
+# Everything listed here compiles without an OpenGL or GLFW header and needs
+# no GL context at runtime, which is what makes it linkable into both the game
+# and the headless test binaries. config.h guards the glad/GLFW includes behind
+# LINTERRA_NO_OPENGL, so these are compiled with that defined.
+#
+# The point of the library is that the game and the tests compile the *same*
+# objects. Previously linterra_tests named src/camera.cpp and src/frustum.cpp
+# directly, producing a second, independent copy that could silently drift
+# from the game's.
+#
+# To add a source here it must compile with -DLINTERRA_NO_OPENGL and must not
+# reference a GL type. src/chunk.cpp and everything above it are excluded
+# because chunk.h includes <glad/glad.h> unconditionally.
+# ---------------------------------------------------------------------------
+set(LINTERRA_CORE_SOURCES
+  src/camera.cpp
+  src/frustum.cpp
+  src/io.cpp
+  src/threadpool.cpp
+)
+
+add_library(linterra_core STATIC ${LINTERRA_CORE_SOURCES})
+
+target_include_directories(linterra_core PUBLIC
+    src
+    vendor/noise/include
+)
+
+target_compile_definitions(linterra_core PRIVATE LINTERRA_NO_OPENGL)
+
+target_link_libraries(linterra_core
+    PUBLIC glm::glm
+    PRIVATE linterra_warnings
+)
+
 # Single source of truth: the glob below already covers everything under
 # src/, including src/renderer/opengl/*. The explicit USE_OPENGL list that used
 # to sit here re-declared those same paths, so a removed source would still be
 # listed and break the build while a new one was silently picked up.
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp" "vendor/glad/src/glad.c" "vendor/noise/src/noise.cpp" "vendor/imgui/imgui.cpp" "vendor/imgui/imgui_draw.cpp" "vendor/imgui/imgui_tables.cpp" "vendor/imgui/imgui_widgets.cpp" "vendor/imgui/imgui_demo.cpp" "vendor/imgui/backends/imgui_impl_glfw.cpp" "vendor/imgui/backends/imgui_impl_opengl3.cpp")
 
-add_executable(${PROJECT_NAME} ${SOURCES})
+# The core sources are now owned by linterra_core; compiling them here as well
+# would give the game duplicate symbol definitions at link time. GLOB_RECURSE
+# yields absolute paths even for a relative pattern, so this filters on the
+# path rather than removing the relative names from the list.
+list(FILTER SOURCES EXCLUDE REGEX "src/(camera|frustum|io|threadpool)\\.cpp$")
 
-target_link_libraries(${PROJECT_NAME} PRIVATE linterra_warnings)
+add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     src
@@ -84,6 +126,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
+    linterra_warnings
+    linterra_core
     OpenGL::GL
     glfw
     glm::glm
@@ -105,9 +149,12 @@ add_custom_command(
 # Unit tests (doctest)
 #
 # Covers the pure (no-GL-context) subsystems: procedural noise, camera math,
-# and frustum culling. These are the math-heavy, regression-prone parts. The
-# test executable links only the sources it needs, so no OpenGL/GLFW runtime
-# is required to build or run it.
+# and frustum culling. These are the math-heavy, regression-prone parts.
+#
+# The engine code under test comes from linterra_core, the same static library
+# the game links, so a test can never pass against a private copy of the code
+# that the game does not actually use. No OpenGL/GLFW runtime is required to
+# build or run this target.
 # ---------------------------------------------------------------------------
 option(BUILD_TESTS "Build the unit test suite" ON)
 
@@ -118,8 +165,6 @@ if(BUILD_TESTS)
     tests/test_camera.cpp
     tests/test_frustum.cpp
     vendor/noise/src/noise.cpp
-    src/camera.cpp
-    src/frustum.cpp
   )
 
   target_include_directories(linterra_tests PRIVATE
@@ -137,7 +182,11 @@ if(BUILD_TESTS)
     CXX_EXTENSIONS OFF
   )
 
-  target_link_libraries(linterra_tests PRIVATE linterra_warnings glm::glm)
+  target_link_libraries(linterra_tests PRIVATE
+    linterra_warnings
+    linterra_core
+    glm::glm
+  )
 
   enable_testing()
   add_test(NAME linterra_tests COMMAND linterra_tests)
