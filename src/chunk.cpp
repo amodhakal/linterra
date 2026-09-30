@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "config.h"
+#include "heightmap.h"
 #include "renderer/renderer.hpp"
 #include "shader.h"
 
@@ -137,17 +138,8 @@ void Chunk::generateHeightMapCPU(const glm::ivec2 &position) {
   const float baseX = static_cast<float>(position.x) * static_cast<float>(Constants::Chunk::LENGTH);
   const float baseZ = static_cast<float>(position.y) * static_cast<float>(Constants::Chunk::LENGTH);
 
-  auto sampleGrassHeightWorld = [&](float worldBlockX, float worldBlockZ) -> uint16_t {
-    auto n = Noise::fbm(
-        glm::vec2(worldBlockX, worldBlockZ) * Constants::Noise::FREQUENCY,
-        Constants::Noise::FRACTAL_OCTAVE, Constants::Noise::FRACTAL_LACUNARITY,
-        Constants::Noise::FRACTAL_GAIN);
-    float noiseY = n.value;
-    noiseY /= 2.0f;
-    noiseY += 0.5f;
-
-    return static_cast<uint16_t>(
-        std::floor(noiseY * static_cast<float>(Constants::Chunk::MAX_BLOCK_HEIGHT)));
+  auto sampleGrassHeightWorld = [&](float worldBlockX, float worldBlockZ) {
+    return Heightmap::sampleWorld(worldBlockX, worldBlockZ);
   };
 
   for (uint32_t ex = 0; ex < kExtSide; ex++) {
