@@ -7,7 +7,8 @@
 #   just run          # build (if needed) and run the engine
 #   just clean        # remove build directory
 #   just fmt          # format source with clang-format
-#   just clippy       # run clang-tidy on the codebase
+#   just fmt-check    # verify formatting without writing
+#   just tidy         # run clang-tidy over an existing build tree
 
 # --- Configuration ----------------------------------------------------------
 build_dir := "build"
@@ -42,12 +43,36 @@ clean:
 
 fmt:
   # Requires: clang-format
-  find src tests -name '*.cpp' -o -name '*.h' | xargs clang-format -i -style=file
+  # The predicates are grouped: without the parentheses `-o` binds loosely and
+  # any predicate added later would only apply to the second branch. The
+  # `.hpp` list matters -- the renderer interface headers are all .hpp.
+  find src tests -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
+    | xargs clang-format -i -style=file
 
-clippy check-tidy:
-  # Requires: clang-tidy
-  cmake -S . -B {{build_dir}} -DCMAKE_CXX_COMPILER={{cxx}} -DCMAKE_CXX_CLANG_TIDY="clang-tidy"
-  cmake --build {{build_dir}} --parallel
+fmt-check:
+  # Requires: clang-format. Fails if anything is unformatted.
+  find src tests -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
+    | xargs clang-format --dry-run --Werror -style=file
+
+tidy:
+  # Requires: clang-tidy. Standalone lint pass over an existing build tree.
+  # CMake now emits compile_commands.json by default (see CMakeLists.txt), so
+  # this reads the same compilation database clangd and editors use.
+  # Configure first if the build directory does not exist yet.
+  test -f {{build_dir}}/compile_commands.json \
+    || cmake -S . -B {{build_dir}} -DCMAKE_BUILD_TYPE=Debug
+  run-clang-tidy -p {{build_dir}} \
+    'src/.*\.cpp$' 'src/.*\.hpp$'
+
+tidy-build:
+  # Requires: clang-tidy. Lints by building, which works without
+  # run-clang-tidy or an existing compile_commands.json, but compiles
+  # everything rather than only reporting diagnostics.
+  cmake -S . -B {{build_dir}}-tidy \
+    -DCMAKE_CXX_COMPILER={{cxx}} \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_CXX_CLANG_TIDY="clang-tidy"
+  cmake --build {{build_dir}}-tidy --parallel
 
 # --- Shorthands -------------------------------------------------------------
 b := "build"
