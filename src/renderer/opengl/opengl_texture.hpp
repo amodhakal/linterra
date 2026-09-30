@@ -17,6 +17,7 @@ class OpenGLTexture : public ITexture {
   void bind(int unit) override;
   void unbind() override;
   uint32_t getId() const override { return m_Id; }
+  TextureType getType() const override { return m_Type; }
 
  private:
   uint32_t m_Id = 0;

@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <glad/glad.h>
@@ -28,6 +29,7 @@
 #include "chunk.h"
 #include "config.h"
 #include "io.h"
+#include "renderer/opengl/gl_texture_type.hpp"
 #include "renderer/renderer.hpp"
 #include "shader.h"
 
@@ -217,6 +219,47 @@ int main() {
 
       chunk.cleanup();
       Report("chunk cleanup", true);
+    }
+
+    // --- Texture targets (#149) -------------------------------------------
+    // setTextureParameter and generateMipmaps used to name GL_TEXTURE_2D_ARRAY
+    // unconditionally. glTexParameteri and glGenerateMipmap act on whichever
+    // target is named, so configuring a Texture2D wrote state to whichever
+    // texture was bound to the *array* target -- silently, with no GL error,
+    // because the default texture object happily absorbs it.
+    //
+    // So the check has to read the state back off the texture itself. Asserting
+    // on glGetError is useless here: the wrong-target write is a legal call.
+    for (const auto [type, label] :
+         {std::pair{TextureType::Texture2D, "Texture2D"},
+          std::pair{TextureType::Texture2DArray, "Texture2DArray"}}) {
+      auto texture = renderer->createTexture(type);
+      if (!texture) {
+        Report(std::string("createTexture: ") + label, false);
+        continue;
+      }
+
+      const GLenum target = textureTypeToGL(type);
+      const GLint sentinel = GL_CLAMP_TO_EDGE;
+
+      // Set through the renderer, then read back through GL from the texture's
+      // own target. If the renderer named the wrong target, the write landed
+      // elsewhere and the texture keeps its default of GL_REPEAT.
+      renderer->setTextureParameter(*texture, GL_TEXTURE_WRAP_S, sentinel);
+      texture->bind(0);
+
+      GLint wrapS = -1;
+      // This vendored GLAD exposes only the "iv" variant, not "i".
+      glGetTexParameteriv(target, GL_TEXTURE_WRAP_S, &wrapS);
+      Report(std::string("setTextureParameter lands on the right target: ") +
+                 label,
+             wrapS == sentinel,
+             "read back " + std::to_string(wrapS) + ", expected " +
+                 std::to_string(sentinel));
+
+      // Same for mipmapping, which also takes a target.
+      renderer->generateMipmaps(*texture);
+      ReportGlErrors((std::string("generateMipmaps: ") + label).c_str());
     }
 
     // --- Offscreen framebuffer ---------------------------------------------

@@ -124,6 +124,14 @@ class ITexture {
   virtual void bind(int unit) = 0;
   virtual void unbind() = 0;
   virtual uint32_t getId() const = 0;
+
+  /** The texture's target (2D, 2D array, 3D, cubemap).
+   *
+   *  Callers that issue texture state changes need this: glTexParameteri and
+   *  glGenerateMipmap both take a target, and passing the wrong one silently
+   *  affects a texture that is not bound to it. Without this the renderer had
+   *  to assume a target, and it assumed 2D_ARRAY for everything. */
+  virtual TextureType getType() const = 0;
 };
 
 class IRenderer {
