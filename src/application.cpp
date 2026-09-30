@@ -225,6 +225,12 @@ void Application::handleResizeCallback(void* context, int width, int height) {
   application->m_Renderer->setViewport(0, 0, width, height);
   application->m_FrameWidth = static_cast<std::uint32_t>(width);
   application->m_FrameHeight = static_cast<std::uint32_t>(height);
+  // The projection and the frustum's side planes are both built from the
+  // aspect ratio, so it has to be updated here too -- otherwise a resize
+  // stretches the view and leaves culling describing a different shape than
+  // the one being drawn.
+  application->m_Player.getCamera()->setAspect(application->m_FrameWidth,
+                                                application->m_FrameHeight);
   application->m_Renderer->resizeOffscreenTarget(
       static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
 }
