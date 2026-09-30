@@ -67,3 +67,26 @@ jobs:
         # ctest returns non-zero if any test fails, which fails the job and
         # blocks the push/merge.
         run: ctest --test-dir build --output-on-failure
+
+  validate-shaders:
+    # Shaders are compiled by the driver at runtime, so a syntax error in one
+    # shows up as a broken frame on a machine with a GL context -- never in
+    # the headless unit suite. This compiles them with glslangValidator so a
+    # bad shader fails the push instead.
+    #
+    # Shader validation is platform-independent, so this runs once rather than
+    # across the OS matrix, and it needs no CMake configure or build.
+    name: Validate shaders
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install glslang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools
+
+      - name: Compile shaders
+        run: ./scripts/validate-shaders.sh
