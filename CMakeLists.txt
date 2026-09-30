@@ -192,6 +192,7 @@ if(BUILD_TESTS)
     tests/test_noise.cpp
     tests/test_camera.cpp
     tests/test_frustum.cpp
+    tests/test_heightmap.cpp
     tests/test_io.cpp
     tests/test_packed_vertex.cpp
     tests/test_player.cpp

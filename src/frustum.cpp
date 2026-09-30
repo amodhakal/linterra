@@ -1,10 +1,18 @@
 #include "frustum.h"
 
+#include <cmath>
+
 #include "config.h"
 
 Frustum::Frustum(const Camera *camera) {
-  float halfVSide = camera->m_Far * tan(camera->m_Fov * 0.5);
-  float halfHSide = halfVSide * camera->m_Aspect;
+  // m_Fov is in degrees, so it has to be converted before it reaches tan().
+  // Camera::getProjection does the same conversion; without it here the
+  // culling cone and the rendered cone disagree, and because tan() goes
+  // negative across part of the FOV_MIN..FOV_MAX range the side-plane normals
+  // invert and the frustum collapses.
+  const float halfVSide =
+      camera->m_Far * std::tan(glm::radians(camera->m_Fov) * 0.5f);
+  const float halfHSide = halfVSide * camera->m_Aspect;
   const glm::vec3 frontMultFar = camera->m_Far * camera->m_Front;
 
   m_NearFace = {camera->m_Position + camera->m_Near * camera->m_Front,
