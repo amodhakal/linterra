@@ -6,7 +6,7 @@
 #include "renderer/renderer.hpp"
 
 Player::Player(const glm::vec3& position)
-    : m_Camera(position), m_Velocity(0.0f, 0.0f, 0.0f), m_AllowJumping(false) {}
+    : m_Velocity(0.0f, 0.0f, 0.0f), m_Camera(position), m_AllowJumping(false) {}
 
 void Player::update(float deltaTime, std::int32_t currentY) {
   if (Constants::DO_GRAVITY) {

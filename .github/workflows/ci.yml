@@ -6,7 +6,114 @@ on:
 
 jobs:
   build-and-test:
-    name: Build & Test (Ubuntu, clang)
+    # macOS is not redundant coverage: it is the platform the engine is
+    # developed and run on, and it is the only one that compiles the
+    # __APPLE__ branches (src/config.h noise selection,
+    # src/io.cpp _NSGetExecutablePath, the GLFW_OPENGL_FORWARD_COMPAT and
+    # forced-3.3-context hints in src/renderer/opengl/opengl_renderer.cpp).
+    # None of that is compiled on Ubuntu, so a break in it can only be found
+    # by running the app locally.
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            clang \
+            libgl1-mesa-dev \
+            libgl1-mesa-dri \
+            libglfw3-dev \
+            libglm-dev \
+            xvfb
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        # Apple clang is already the system toolchain, so only the libraries
+        # and a CMake new enough for the 3.20 floor need installing.
+        run: brew install cmake glfw glm
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=ON
+
+      - name: Build
+        # Build the default target set, not just linterra_tests, so a broken
+        # game build can't reach main green.
+        run: cmake --build build --parallel
+
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        # The runner has no display, and linterra_smoke needs a real GL
+        # context, so the whole suite runs under a virtual display. Mesa's
+        # software rasteriser (libgl1-mesa-dri) supplies the context.
+        run: xvfb-run -a ctest --test-dir build --output-on-failure
+
+      - name: Test (macOS)
+        if: runner.os == 'macOS'
+        # ctest returns non-zero if any test fails, which fails the job and
+        # blocks the push/merge.
+        #
+        # linterra_smoke is excluded here: a GitHub macOS runner has no window
+        # server session, so glfwCreateWindow returns null and no CGL context
+        # can be created at all. The job still does its real job -- compiling
+        # every __APPLE__ branch on the primary development platform and
+        # running the unit suite -- and the GL path is covered by the Linux leg
+        # under xvfb instead.
+        run: ctest --test-dir build --output-on-failure -E linterra_smoke
+
+  validate-shaders:
+    # Shaders are compiled by the driver at runtime, so a syntax error in one
+    # shows up as a broken frame on a machine with a GL context -- never in
+    # the headless unit suite. This compiles them with glslangValidator so a
+    # bad shader fails the push instead.
+    #
+    # Shader validation is platform-independent, so this runs once rather than
+    # across the OS matrix, and it needs no CMake configure or build.
+    name: Validate shaders
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install glslang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools
+
+      - name: Compile shaders
+        run: ./scripts/validate-shaders.sh
+
+  sanitizers:
+    # ASan + UBSan over the unit suite. The justfile has supported a
+    # sanitizer build locally via `just dev`, but nothing ran it
+    # automatically, so a use-after-free or undefined operation could sit in
+    # the tree indefinitely.
+    name: Sanitizers (ASan, UBSan)
     runs-on: ubuntu-latest
 
     steps:
@@ -21,22 +128,40 @@ jobs:
             cmake \
             clang \
             libgl1-mesa-dev \
+            libgl1-mesa-dri \
             libglfw3-dev \
-            libglm-dev
+            libglm-dev \
+            xvfb
 
       - name: Configure
         run: |
-          cmake -S . -B build \
+          cmake -S . -B build-sanitize \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON \
+            -DLINTERRA_SANITIZE=address,undefined \
             -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
-            -DBUILD_TESTS=ON
+            -DCMAKE_CXX_COMPILER=clang++
 
       - name: Build
-        # Build the default target set, not just linterra_tests, so a broken
-        # game build can't reach main green.
-        run: cmake --build build -j"$(nproc)"
+        run: cmake --build build-sanitize --parallel
 
-      - name: Test
-        # ctest returns non-zero if any test fails, which fails the job and
-        # blocks the push/merge.
-        run: ctest --test-dir build --output-on-failure
+      - name: Test (unit suite)
+        # halt_on_error makes UBSan abort on the first report instead of
+        # printing and continuing -- without it a job full of undefined
+        # behaviour still passes. detect_leaks enables LeakSanitizer, which is
+        # Linux-only, which is why this job is not in the OS matrix.
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          ASAN_OPTIONS: detect_leaks=1
+        run: ctest --test-dir build-sanitize --output-on-failure -E linterra_smoke
+
+      - name: Test (GL smoke test)
+        # Run separately, and without detect_leaks. LeakSanitizer is pointed at
+        # Mesa's llvmpipe here, which retains internal allocations the
+        # sanitizer cannot see, so it would report driver-internal blocks as
+        # leaks in the engine. UBSan and ASan's memory-error checks are still
+        # active, which is what matters here: the GL path is covered
+        # nowhere else, and it is where the M12 lifetime defects live.
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: xvfb-run -a ctest --test-dir build-sanitize --output-on-failure -R linterra_smoke

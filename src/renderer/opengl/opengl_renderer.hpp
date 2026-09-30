@@ -58,6 +58,7 @@ class OpenGLRenderer : public IRenderer {
   void initializeWindowing() override;
   void terminateWindowing() override;
   void configureWindowHints() override;
+  void setWindowVisible(bool visible) override;
   bool createWindow(int width, int height, const char* title) override;
   void makeContextCurrent() override;
   void setCursorDisabled() override;
