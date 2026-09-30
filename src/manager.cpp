@@ -56,6 +56,10 @@ void ChunkManager::load() {
                         sizeof(uint32_t);
       m_HeightMapSSBO = m_Renderer->createBuffer(BufferType::Storage);
       m_Renderer->setBufferData(*m_HeightMapSSBO, nullptr, ssboSize, BufferUsage::Dynamic);
+      // Every slot starts free. They are returned only after their chunk's
+      // readback completes, so a slot is never handed out twice while an
+      // earlier dispatch into it is still unread.
+      m_GpuSlots = GpuSlotPool{kGpuSlots};
     } catch (const std::exception& e) {
       std::println("Failed to load terrain compute shader, falling back to CPU noise: {}", e.what());
     }
@@ -98,6 +102,13 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
         m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
         result.chunk.finishHeightMapGPU(result.slot, *m_HeightMapSSBO);
         result.chunk.generateMesh();
+        // The slot's contents have now been consumed, so it can serve another
+        // dispatch. Releasing it here rather than at dispatch time is what
+        // makes the slot's lifetime exactly one readback (#126).
+        if (result.slot != TaskResult::kNoGpuSlot) {
+          m_GpuSlots.release(result.slot);
+          result.slot = TaskResult::kNoGpuSlot;
+        }
         // The worker only flags meshReady on this path; the mesh itself is
         // built here, so this is the point where the chunk is ready to upload.
         // Without it the chunk would be re-meshed every frame and never
@@ -120,6 +131,14 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     // Erasing earlier would leave the worker meshing into freed memory.
     if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
       result.chunk.cleanup();
+      // The chunk is being dropped without ever being read back, so its slot
+      // would otherwise stay marked in-flight forever. After enough camera
+      // movement every slot leaks and the GPU path silently stops being used
+      // at all.
+      if (result.slot != TaskResult::kNoGpuSlot) {
+        m_GpuSlots.release(result.slot);
+        result.slot = TaskResult::kNoGpuSlot;
+      }
       {
         std::lock_guard<std::mutex> lock(m_ProcessingMutex);
         m_ProcessingPositions.erase(position);
@@ -175,19 +194,29 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       const bool enqueued = [&] {
         if (Constants::Noise::USE_GPU && m_HeightMapSSBO &&
             m_ComputeShader.getId() != 0) {
-          // Batched GPU path: dispatch into this chunk's slot of the shared
-          // SSBO and defer both meshing and readback. The main thread never
-          // blocks on a per-chunk GPU sync here; the readback happens later,
-          // once the slot has been given a full frame to complete.
-          const uint32_t slot = m_NextGpuSlot++ % kGpuSlots;
-          result.slot = slot;
-          m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
-          result.chunk.generateHeightMapGPU(position, slot, m_ComputeShader);
-          return m_ThreadPool.tryEnqueue(
-              [&result]() {
-                result.meshReady.store(true, std::memory_order_release);
-              },
-              kMaxPendingTasks);
+          // Batched GPU path: dispatch into a free slot of the shared SSBO
+          // and defer both meshing and readback. The main thread never
+          // blocks on a per-chunk GPU sync here; the readback happens
+          // later, once the slot has been given a full frame to complete.
+          //
+          // A slot is only taken if one is free. The previous code used
+          // `m_NextGpuSlot++ % kGpuSlots`, which handed out slots that were
+          // still in flight: one frame dispatches up to kMaxPendingTasks
+          // chunks, so all 64 slots were overwritten 16x before the first
+          // readback, and every chunk was meshed from whichever chunk had
+          // been dispatched last (#126). With the slots exhausted, fall
+          // through to the CPU path below for this position rather than
+          // corrupting the terrain.
+          if (const auto slot = m_GpuSlots.acquire()) {
+            result.slot = *slot;
+            m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
+            result.chunk.generateHeightMapGPU(position, *slot, m_ComputeShader);
+            return m_ThreadPool.tryEnqueue(
+                [&result]() {
+                  result.meshReady.store(true, std::memory_order_release);
+                },
+                kMaxPendingTasks);
+          }
         }
 
         return m_ThreadPool.tryEnqueue(
@@ -204,6 +233,16 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
         // the position in m_ProcessingPositions forever, since nothing will
         // ever flag the chunk ready. Safe to erase now precisely because no
         // task was queued and therefore none holds a reference to `result`.
+        //
+        // The GPU slot has already been taken and the compute dispatch has
+        // already been issued, but nothing will ever read it back now, so it
+        // has to be released here too. Without this the pool's backlog cap
+        // leaks slots, and after 64 such frames the GPU path is disabled for
+        // the rest of the session.
+        if (result.slot != TaskResult::kNoGpuSlot) {
+          m_GpuSlots.release(result.slot);
+          result.slot = TaskResult::kNoGpuSlot;
+        }
         std::lock_guard<std::mutex> lock(m_ProcessingMutex);
         m_ProcessingChunks.erase(position);
         m_ProcessingPositions.erase(position);

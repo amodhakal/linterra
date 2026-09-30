@@ -8,9 +8,11 @@
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 #include "camera.h"
 #include "chunk.h"
+#include "gpu_slot_pool.h"
 #include "shader.h"
 #include "threadpool.h"
 
@@ -20,7 +22,12 @@ struct TaskResult {
   Chunk chunk;
   std::atomic<bool> meshReady{false};
   std::atomic<bool> uploadReady{false};
-  uint32_t slot = 0;
+  // The SSBO slot this chunk's heightmap was dispatched into, or kNoGpuSlot
+  // if it took the CPU path. Tracked so the slot is returned to the free list
+  // exactly once -- on readback, and on the discard path too, where the chunk
+  // is dropped before it is ever read back.
+  static constexpr uint32_t kNoGpuSlot = 0xFFFFFFFFu;
+  uint32_t slot = kNoGpuSlot;
 
   TaskResult() = delete;
   explicit TaskResult(IRenderer* renderer) : chunk(renderer) {}
@@ -87,8 +94,20 @@ private:
   // Batched GPU heightmap generation: each in-flight chunk gets a slot of
   // the shared SSBO; readback is deferred so the main thread never stalls
   // on a per-chunk pipeline sync.
+  //
+  // A slot may only be handed out while it is free, and it becomes free again
+  // only once that chunk's readback has completed. The previous code used
+  // `m_NextGpuSlot++ % kGpuSlots`, which recycles unconditionally: a cold
+  // start dispatches up to kMaxPendingTasks chunks in one frame, so each of
+  // the 64 slots was overwritten 16 times before the first readback could
+  // run. Measured 100% of readbacks returned another chunk's heights (#126).
   static constexpr uint32_t kGpuSlots = 64;
-  uint32_t m_NextGpuSlot = 0;
+
+  // Slots currently free for dispatch. A slot is handed out by acquire() and
+  // returned by release() once the owning chunk has been read back. Held on
+  // the main thread only -- render() is single-threaded, and the worker task
+  // touches neither this pool nor any slot.
+  GpuSlotPool m_GpuSlots{kGpuSlots};
 
   // Cap on how many meshing tasks may sit in the pool's queue at once. The
   // render window spans (2 * RENDER_DISTANCE_CHUNKS + 1)^2 == 4225 chunk
