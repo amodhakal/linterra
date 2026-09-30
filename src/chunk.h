@@ -175,4 +175,11 @@ private:
 
   /** True after the deferred GPU readback has filled the height maps. */
   bool m_GpuHeightMapReady = false;
+
+  /**
+   * Scratch for the GPU heightmap readback, kept as a member so the
+   * per-chunk allocation does not happen on every readback. Sized once to
+   * kExtSide*kExtSide and reused.
+   */
+  std::vector<uint32_t> m_ReadbackScratch;
 };

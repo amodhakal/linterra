@@ -9,6 +9,7 @@
 #include "opengl_texture.hpp"
 #include "opengl_vertex_array.hpp"
 
+#include <cstdio>
 #include <stdexcept>
 
 OpenGLRenderer::OpenGLRenderer() = default;
@@ -50,7 +51,8 @@ void OpenGLRenderer::setBufferData(IBuffer& buffer, const void* data,
                   ? GL_SHADER_STORAGE_BUFFER
                   : GL_ARRAY_BUFFER;
   glBufferData(target, static_cast<GLsizeiptr>(size), data,
-               convertBufferUsage(usage));
+               convertBufferUsage(usage, glBuffer.getType()));
+  glBuffer.setSize(size);
 }
 
 void OpenGLRenderer::bindBufferBase(IBuffer& buffer, uint32_t bindingPoint) {
@@ -64,7 +66,33 @@ void OpenGLRenderer::bindBufferBase(IBuffer& buffer, uint32_t bindingPoint) {
   glBindBufferBase(target, bindingPoint, buffer.getId());
 }
 
-void OpenGLRenderer::getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) {
+bool OpenGLRenderer::getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) {
+  // Order the shader-storage writes issued by dispatchCompute before reading.
+  // The invariant Chunk::finishHeightMapGPU relies on is documented in
+  // chunk.cpp but used to live three files away here, so a second readback
+  // path or a reorder of dispatchCompute would silently break it. The barrier
+  // belongs at the read site, where the requirement actually is.
+  //
+  // GLAD resolves GL 3.1+ entry points as function pointers, and a context
+  // older than 3.1 leaves this one null -- calling it is a jump to address 0.
+  // macOS caps at 4.1 for core profile but still exposes the barrier through
+  // the extension path, so guard on the pointer rather than on a version
+  // number. The same guard applies to dispatchCompute's call.
+  if (glad_glMemoryBarrier != nullptr) {
+    glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT);
+  }
+
+  // Bounds-check before the call. glGetBufferSubData raises GL_INVALID_VALUE
+  // when offset + size exceeds the buffer and then writes nothing, which the
+  // caller cannot distinguish from a successful read of zeroes.
+  if (offset > buffer.getSize() || size > buffer.getSize() - offset) {
+    std::fprintf(stderr,
+                 "OpenGLRenderer::getBufferSubData: range [%zu, %zu) exceeds "
+                 "the %zu-byte buffer\\n",
+                 offset, offset + size, buffer.getSize());
+    return false;
+  }
+
   buffer.bind();
   auto& glBuffer = dynamic_cast<OpenGLBuffer&>(buffer);
   GLenum target = (glBuffer.getType() == BufferType::Index) 
@@ -74,11 +102,30 @@ void OpenGLRenderer::getBufferSubData(IBuffer& buffer, size_t offset, size_t siz
                   : GL_ARRAY_BUFFER;
   glGetBufferSubData(target, static_cast<GLintptr>(offset), static_cast<GLsizeiptr>(size), data);
   buffer.unbind();
+
+  // Drain the whole error queue rather than taking a single glGetError: one
+  // call can return an error that was already pending before this function
+  // ran, which would blame this read for someone else's mistake. Draining
+  // here also keeps the failure local -- it cannot be misattributed to a
+  // later call the way a once-per-frame drain can.
+  const GLenum error = glGetError();
+  if (error != GL_NO_ERROR) {
+    std::fprintf(stderr,
+                 "OpenGLRenderer::getBufferSubData: GL error 0x%04x reading "
+                 "[%zu, %zu) from a %zu-byte buffer\\n",
+                 static_cast<unsigned>(error), offset, offset + size,
+                 buffer.getSize());
+    return false;
+  }
+  return true;
 }
 
 void OpenGLRenderer::dispatchCompute(uint32_t numGroupsX, uint32_t numGroupsY, uint32_t numGroupsZ) {
   glDispatchCompute(numGroupsX, numGroupsY, numGroupsZ);
-  glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+  // See getBufferSubData: glad_glMemoryBarrier is null on a pre-3.1 context.
+  if (glad_glMemoryBarrier != nullptr) {
+    glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT | GL_BUFFER_UPDATE_BARRIER_BIT);
+  }
 }
 
 std::unique_ptr<IVertexArray> OpenGLRenderer::createVertexArray() {
@@ -391,7 +438,38 @@ int OpenGLRenderer::convertKey(Key key) {
   return GLFW_KEY_UNKNOWN;
 }
 
-GLenum OpenGLRenderer::convertBufferUsage(BufferUsage usage) {
+// A storage buffer takes a *_STORAGE usage, not a *_DRAW one: glBufferData
+// raises GL_INVALID_ENUM for GL_SHADER_STORAGE_BUFFER given GL_STATIC_DRAW,
+// GL_DYNAMIC_DRAW or GL_STREAM_DRAW, and silently allocates nothing. That is
+// not hypothetical -- the engine's heightmap SSBO is the only storage buffer
+// in the codebase, and it is created with BufferUsage::Dynamic, so on every
+// non-Apple build its glBufferData failed and the deferred readback then read
+// from a buffer with no allocation.
+//
+// Mapping is per buffer type, so this takes the type as well. The draw-usage
+// spellings are unchanged for vertex/index buffers.
+GLenum OpenGLRenderer::convertBufferUsage(BufferUsage usage, BufferType type) {
+  if (type == BufferType::Storage) {
+    // Spelled numerically: this vendored GLAD does not define the *_STORAGE
+    // usage enums, though it does define GL_SHADER_STORAGE_BUFFER. These are
+    // the GL 4.4 core values (Table 23.13) and are fixed by the spec.
+    //
+    // Note GL_DYNAMIC_STORAGE and GL_DYNAMIC_DRAW share the value 0x88E8,
+    // and GL_STREAM_STORAGE (0x88E9) collides with GL_DYNAMIC_READ. Only the
+    // target distinguishes them, which is why this branch exists.
+    constexpr GLenum kStaticStorage = 0x88E0;
+    constexpr GLenum kDynamicStorage = 0x88E8;
+    constexpr GLenum kStreamStorage = 0x88E9;
+    switch (usage) {
+      case BufferUsage::Static:
+        return kStaticStorage;
+      case BufferUsage::Dynamic:
+        return kDynamicStorage;
+      case BufferUsage::Stream:
+        return kStreamStorage;
+    }
+    return kStaticStorage;
+  }
   switch (usage) {
     case BufferUsage::Static:
       return GL_STATIC_DRAW;
