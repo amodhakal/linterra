@@ -109,6 +109,27 @@ The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
 
 ---
 
+## Roadmap
+
+Milestones 1–9 are shipped (see [Implemented Features](#implemented-features) below). M10–M19 are the planned sequence, and they are strictly ordered — each gates the next.
+
+| Milestone | Title | Issues | Scope |
+| --- | --- | --- | --- |
+| M10 | Build, CI & Safety Net | 11 | Headless smoke tests, game in CI |
+| M11 | Render Correctness: GPU Terrain & Culling | 10 | Fix culling, SSBO slots, winding |
+| M12 | Resource Lifetime, Shutdown & Error Reporting | 14 | Shutdown order, GL error attribution |
+| M13 | Threading, Chunk Pipeline & Player Physics | 11 | Physics query, race windows |
+| M14 | Renderer Abstraction & Backend Portability | 9 | Split `IRenderer`, Metal/Vulkan |
+| M15 | Streaming & Draw-Path Performance | 10 | Draw-call sorting, greedy meshing |
+| M16 | Rendering Quality: Lighting, Water & Terrain | 9 | AO, water, biome variety |
+| M17 | Gameplay: Interaction, Persistence & UI | 7 | Block editing, collision, HUD |
+| M18 | Documentation, Licensing & Code Hygiene | 9 | License, naming, dead code |
+| M19 | Spatial Partitioning & LOD | 1 | Sparse voxel octree |
+
+Full dependency graph and issue lists: [docs/roadmap.md](docs/roadmap.md).
+
+---
+
 ## Implemented Features
 
 ### Milestone 9 — GPU-Accelerated Terrain Generation & Platform-Adaptive Noise Fallback
