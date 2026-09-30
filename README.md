@@ -41,7 +41,7 @@ brew install glfw glm
 **Linux (Debian/Ubuntu):**
 
 ```bash
-sudo apt install libglfw3-dev libglm-dev
+sudo apt install libgl1-mesa-dev libglfw3-dev libglm-dev
 ```
 
 **Windows:**
@@ -95,9 +95,14 @@ With CMake directly:
 ```bash
 git clone https://github.com/amodhakal/linterra.git
 cd linterra
+git submodule update --init --recursive   # only needed for the Metal backend
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
+
+The single submodule is `vendor/metal-cpp`, for the unimplemented Metal
+backend. It is not built or referenced today, so a plain clone is enough
+unless you are working on that backend.
 
 Or with `just` (see `justfile` for all recipes):
 
@@ -109,8 +114,13 @@ just dev      # debug build with sanitizers
 ### Run
 
 ```bash
-./build/linterra
+./build/linterra              # random world seed
+./build/linterra 12345        # fixed world seed, echoed at startup
 ```
+
+The optional argument is the world seed, an integer in `[0, 4294967295]`. It
+is echoed on startup, so it is the first thing to quote when reporting a
+terrain bug — the same seed reproduces the same world.
 
 ### Unit Tests
 
@@ -231,13 +241,13 @@ This milestone decoupled fog from the scene's fragment shader by moving it into 
 
 **Offscreen Render Target**
 
-- Added `Framebuffer` (`src/framebuffer.h` / `src/framebuffer.cpp`): owns an FBO with an RGBA color texture and a depth renderbuffer, resized on window changes. The scene's view-space distance is carried in the color alpha channel so the fog pass can reconstruct it without a depth-texture attachment.
+- Added an offscreen FBO inside the OpenGL backend (`OpenGLRenderer::resizeOffscreenTarget`, `src/renderer/opengl/opengl_renderer.cpp`, torn down by `destroyOffscreenTarget`): owns a framebuffer with an RGBA color texture and a depth renderbuffer, resized on window changes. The scene's view-space distance is carried in the color alpha channel so the fog pass can reconstruct it without a depth-texture attachment.
 
 **Two-Stage Render Pipeline**
 
 - Scene pass (`render.vert` / `render.frag`): samples the texture atlas, applies directional face lighting, and writes shaded color + view distance — no fog math.
 - Fog pass (`fog.vert` / `fog.frag`): a single attribute-less fullscreen triangle composites exponential fog over the offscreen scene using `uFogStart` / `uFogEnd` / `uFogColor`.
-- `Application::update()` now renders the world into the framebuffer, then binds it as a sampler for the fog shader onto the default framebuffer. Window resize forwards to `Framebuffer::resize`.
+- `Application::update()` now renders the world into the framebuffer, then binds it as a sampler for the fog shader onto the default framebuffer. Window resize forwards to `IRenderer::resizeOffscreenTarget`.
 
 **Shader Reorganization**
 
@@ -245,7 +255,7 @@ This milestone decoupled fog from the scene's fragment shader by moving it into 
 
 ### Milestone 7 — Unit Testing & CI
 
-This milestone added a regression safety net so math-heavy subsystems can be validated automatically on every push, rather than verified by eye.
+This milestone added a regression safety net so math-heavy subsystems can be validated automatically on every push, rather than verified by eye. It is a partial net, and the gaps are known — see the caveat below.
 
 **Test Framework**
 
@@ -263,7 +273,19 @@ This milestone added a regression safety net so math-heavy subsystems can be val
 
 - `config.h` now guards GLAD/GLFW behind a `LINTERRA_NO_OPENGL` macro so pure math compiles without GL headers.
 - Tests caught and fixed a real bug: `Camera::getRight()` computed `cross(m_Up, m_WorldUp)` (zero vector → NaN via `normalize`), silently corrupting frustum side-plane culling. Now uses `cross(m_Front, m_Up)`.
-- Fixed case-sensitive includes (`"frustum.h"` → `"Frustum.h"`) in `frustum.cpp`/`manager.cpp` that warned on macOS and would break the build on Linux/Windows.
+- Fixed case-sensitive includes in `frustum.cpp`/`manager.cpp` that did not match the actual filename, `src/frustum.h` (all lowercase). They warned on macOS and would have broken the build on Linux/Windows.
+
+> **Known gap, still open.** The frustum tests do not discriminate a correct
+> frustum from a broken one. All four culling cases are decided by the near,
+> far, or left plane, and none pins side-plane correctness — so the suite passes
+> against a frustum that is too wide, or one whose side planes have inverted,
+> just as cleanly as against a correct one. `Frustum::Frustum` is indeed still
+> computing `tan(m_Fov * 0.5)` with `m_Fov` in **degrees** while
+> `Camera::getProjection` correctly wraps it in `glm::radians`, so the culling
+> cone and the rendered cone disagree. It is tracked in **#127** (with the
+> regression test in **#66**, and the umbrella in **#4**), and is deliberately
+> not fixed in this milestone. Treat the frustum coverage as weaker than the
+> "safety net" framing above suggests.
 
 **Continuous Integration**
 
