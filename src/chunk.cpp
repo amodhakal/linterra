@@ -177,7 +177,10 @@ void Chunk::generateMesh() {
   m_Data.clear();
   m_Indices.clear();
 
-  auto blockTextureId = [&](BlockType t, BlockNormal n) -> int32_t {
+  // NOTE: `n` is accepted but ignored, so every face of a block currently
+  // resolves to the same texture layer. Making this honor BlockNormal is
+  // tracked in #60 (M14) and is deliberately not fixed here.
+  auto blockTextureId = [&](BlockType t, [[maybe_unused]] BlockNormal n) -> int32_t {
     switch (t) {
     case BlockType::GRASS:
       return 0;
@@ -212,12 +215,12 @@ void Chunk::generateMesh() {
 
       PackedVertex v;
       v.bits = 0;
-      v.x = static_cast<uint32_t>(bx & 0xFF);
-      v.z = static_cast<uint32_t>(bz & 0xFF);
-      v.y = static_cast<uint32_t>(by & 0x3FF);
-      v.normal = static_cast<uint32_t>(normalId);
-      v.texId = static_cast<uint32_t>(texId & 3);
-      v.corner = corner;
+      v.f.x = static_cast<uint32_t>(bx & 0xFF);
+      v.f.z = static_cast<uint32_t>(bz & 0xFF);
+      v.f.y = static_cast<uint32_t>(by & 0x3FF);
+      v.f.normal = static_cast<uint32_t>(normalId);
+      v.f.texId = static_cast<uint32_t>(texId & 3);
+      v.f.corner = corner;
       m_Data.push_back(v);
     };
 

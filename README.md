@@ -28,8 +28,8 @@ Linterra is a from-scratch, Minecraft-style voxel engine written in modern C++ a
 ### Prerequisites
 
 - macOS 12+ / Linux / Windows 10+
-- C++23-capable compiler (Clang, GCC, or MSVC)
-- CMake 3.16+
+- C++23-capable compiler (GCC >= 13, Clang >= 17, or MSVC >= 19.33 — the engine uses `<print>`)
+- CMake 3.20+ (3.16–3.19 cannot represent `CMAKE_CXX_STANDARD 23`)
 - [just](https://github.com/casey/just) (optional — convenience recipes)
 
 **macOS (Homebrew):**

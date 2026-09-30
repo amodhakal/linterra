@@ -24,9 +24,12 @@ enum BlockNormal : uint8_t {
   TOP_NORMAL = 3
 };
 
+// Packs a chunk vertex into a single uint32_t (see README, Milestone 4).
+// The field struct is named rather than anonymous: an anonymous struct inside
+// a union is a GNU extension, not standard C++, and trips -Wpedantic.
 union PackedVertex {
   uint32_t bits;
-  struct {
+  struct Fields {
     // Y gets 10 bits (supports worlds up to y=1023); the former 2-bit
     // _pad is consumed so the vertex still packs into a uint32_t.
     uint32_t x      : 8;
@@ -35,7 +38,7 @@ union PackedVertex {
     uint32_t normal : 2;
     uint32_t texId   : 2;
     uint32_t corner  : 2;
-  };
+  } f;
 };
 
 class Chunk {

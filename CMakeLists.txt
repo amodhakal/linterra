@@ -1,32 +1,64 @@
-cmake_minimum_required(VERSION 3.16)
+# CXX_STANDARD 23 is only understood by CMake 3.20 and later; on 3.16-3.19 the
+# value is silently unknown and the build degrades or errors out.
+cmake_minimum_required(VERSION 3.20)
 project(linterra VERSION 1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(USE_OPENGL "Use OpenGL renderer" ON)
+# The engine uses C++23 <print>, which is not available on the older toolchains
+# CMake would otherwise happily accept. Fail at configure time with a message
+# that names the actual cause rather than letting <print> surface later as a
+# confusing "not a member of std" error.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 17)
+    message(FATAL_ERROR
+      "Linterra needs C++23 <print>: GCC >= 13 or Clang >= 17 "
+      "(found ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}).")
+  endif()
+elseif(MSVC)
+  if(MSVC_VERSION LESS 1933)
+    message(FATAL_ERROR
+      "Linterra needs C++23 <print>: MSVC >= 19.33 "
+      "(found MSVC ${MSVC_VERSION}).")
+  endif()
+endif()
+
+option(USE_OPENGL "Use OpenGL renderer (currently the only implemented backend)" ON)
 option(USE_METAL "Use Metal renderer (not implemented yet)" OFF)
 option(USE_VULKAN "Use Vulkan renderer (not implemented yet)" OFF)
+
+if(NOT USE_OPENGL)
+  message(WARNING
+    "USE_OPENGL=OFF does not currently exclude the OpenGL backend: every "
+    "source under src/ is picked up by the glob below, and no other backend "
+    "is implemented. Backend selection is still a runtime concern "
+    "(createRenderer/RenderBackend) — see #88 for the Metal/Vulkan work.")
+endif()
+
+# Warning flags shared by every first-party target, so the game and the tests
+# cannot drift apart. Vendored third-party code is compiled as SYSTEM include
+# and is deliberately excluded from these.
+add_library(linterra_warnings INTERFACE)
+target_compile_options(linterra_warnings INTERFACE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wshadow>
+  $<$<CXX_COMPILER_ID:MSVC>:/W4>
+)
 
 find_package(OpenGL REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(glm REQUIRED)
 
+# Single source of truth: the glob below already covers everything under
+# src/, including src/renderer/opengl/*. The explicit USE_OPENGL list that used
+# to sit here re-declared those same paths, so a removed source would still be
+# listed and break the build while a new one was silently picked up.
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp" "vendor/glad/src/glad.c" "vendor/noise/src/noise.cpp" "vendor/imgui/imgui.cpp" "vendor/imgui/imgui_draw.cpp" "vendor/imgui/imgui_tables.cpp" "vendor/imgui/imgui_widgets.cpp" "vendor/imgui/imgui_demo.cpp" "vendor/imgui/backends/imgui_impl_glfw.cpp" "vendor/imgui/backends/imgui_impl_opengl3.cpp")
 
-if(USE_OPENGL)
-  list(APPEND SOURCES
-    src/renderer/renderer_factory.cpp
-    src/renderer/opengl/opengl_buffer.cpp
-    src/renderer/opengl/opengl_vertex_array.cpp
-    src/renderer/opengl/opengl_shader.cpp
-    src/renderer/opengl/opengl_texture.cpp
-    src/renderer/opengl/opengl_renderer.cpp
-  )
-endif()
-
 add_executable(${PROJECT_NAME} ${SOURCES})
+
+target_link_libraries(${PROJECT_NAME} PRIVATE linterra_warnings)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     src
@@ -91,7 +123,7 @@ if(BUILD_TESTS)
     CXX_EXTENSIONS OFF
   )
 
-  target_link_libraries(linterra_tests PRIVATE glm::glm)
+  target_link_libraries(linterra_tests PRIVATE linterra_warnings glm::glm)
 
   enable_testing()
   add_test(NAME linterra_tests COMMAND linterra_tests)
