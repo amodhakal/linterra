@@ -308,41 +308,35 @@ void Chunk::generateMesh() {
           switch (d) {
   case 0:
     a.x = x + 1;
-    du = {0, 0, 1};
-    dv = {0, 1, 0};
     normalId = BlockNormal::RIGHT_LEFT_NORMAL;
     break;
           case 1:
-            du = {0, 1, 0};
-            dv = {0, 0, 1};
             normalId = BlockNormal::RIGHT_LEFT_NORMAL;
             break;
           case 2:
             a.y = y + 1;
-            du = {1, 0, 0};
-            dv = {0, 0, 1};
             normalId = BlockNormal::TOP_NORMAL;
             break;
           case 3:
-            if (y == 0)
-              continue;
-            du = {1, 0, 0};
-            dv = {0, 0, 1};
-            normalId = BlockNormal::BOTTOM_NORMAL;
-            break;
+    if (y == 0)
+      continue;
+    normalId = BlockNormal::BOTTOM_NORMAL;
+    break;
   case 4:
     a.z = z + 1;
-    du = {0, 1, 0};
-    dv = {1, 0, 0};
     normalId = BlockNormal::FRONT_BACK_NORMAL;
     break;
           case 5:
-            du = {1, 0, 0};
-            dv = {0, 1, 0};
             normalId = BlockNormal::FRONT_BACK_NORMAL;
             flipV = true;
             break;
           }
+
+          // Edge vectors come from the single winding table so the mesh code
+          // and the test that validates the winding cannot disagree.
+          const FaceWinding winding = faceWindingForDirection(d);
+          du = {winding.duX, winding.duY, winding.duZ};
+          dv = {winding.dvX, winding.dvY, winding.dvZ};
 
           int32_t texId = blockTextureId(cur, normalId);
           addQuad(a, du, dv, normalId, texId, flipV);
