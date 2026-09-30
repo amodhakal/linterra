@@ -6,14 +6,26 @@ on:
 
 jobs:
   build-and-test:
-    name: Build & Test (Ubuntu, clang)
-    runs-on: ubuntu-latest
+    # macOS is not redundant coverage: it is the platform the engine is
+    # developed and run on, and it is the only one that compiles the
+    # __APPLE__ branches (src/config.h noise selection,
+    # src/io.cpp _NSGetExecutablePath, the GLFW_OPENGL_FORWARD_COMPAT and
+    # forced-3.3-context hints in src/renderer/opengl/opengl_renderer.cpp).
+    # None of that is compiled on Ubuntu, so a break in it can only be found
+    # by running the app locally.
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -24,17 +36,32 @@ jobs:
             libglfw3-dev \
             libglm-dev
 
-      - name: Configure
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        # Apple clang is already the system toolchain, so only the libraries
+        # and a CMake new enough for the 3.20 floor need installing.
+        run: brew install cmake glfw glm
+
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
         run: |
           cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=ON \
             -DCMAKE_C_COMPILER=clang \
-            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_CXX_COMPILER=clang++
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_TESTS=ON
 
       - name: Build
         # Build the default target set, not just linterra_tests, so a broken
         # game build can't reach main green.
-        run: cmake --build build -j"$(nproc)"
+        run: cmake --build build --parallel
 
       - name: Test
         # ctest returns non-zero if any test fails, which fails the job and
