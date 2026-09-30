@@ -174,6 +174,10 @@ class IRenderer {
   virtual void initializeWindowing() = 0;
   virtual void terminateWindowing() = 0;
   virtual void configureWindowHints() = 0;
+  /** Whether the window is mapped on screen. This is a GLFW window hint and
+   *  must be set before createWindow(). Hiding it yields a fully functional
+   *  offscreen context, which is what the headless smoke test needs. */
+  virtual void setWindowVisible(bool visible) = 0;
   virtual bool createWindow(int width, int height, const char* title) = 0;
   virtual void makeContextCurrent() = 0;
   virtual void setCursorDisabled() = 0;

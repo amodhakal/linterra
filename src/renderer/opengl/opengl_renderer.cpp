@@ -180,6 +180,12 @@ void OpenGLRenderer::configureWindowHints() {
 #endif
 }
 
+void OpenGLRenderer::setWindowVisible(bool visible) {
+  // GLFW reads this hint when the window is created, so it has to be set
+  // before createWindow() rather than toggled afterwards.
+  glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
+}
+
 bool OpenGLRenderer::createWindow(int width, int height, const char* title) {
   m_Window = glfwCreateWindow(width, height, title, nullptr, nullptr);
   if (m_Window == nullptr) {

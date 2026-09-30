@@ -33,8 +33,10 @@ jobs:
             cmake \
             clang \
             libgl1-mesa-dev \
+            libgl1-mesa-dri \
             libglfw3-dev \
-            libglm-dev
+            libglm-dev \
+            xvfb
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
@@ -63,7 +65,15 @@ jobs:
         # game build can't reach main green.
         run: cmake --build build --parallel
 
-      - name: Test
+      - name: Test (Linux)
+        if: runner.os == 'Linux'
+        # The runner has no display, and linterra_smoke needs a real GL
+        # context, so the whole suite runs under a virtual display. Mesa's
+        # software rasteriser (libgl1-mesa-dri) supplies the context.
+        run: xvfb-run -a ctest --test-dir build --output-on-failure
+
+      - name: Test (macOS)
+        if: runner.os == 'macOS'
         # ctest returns non-zero if any test fails, which fails the job and
         # blocks the push/merge.
         run: ctest --test-dir build --output-on-failure
@@ -111,8 +121,10 @@ jobs:
             cmake \
             clang \
             libgl1-mesa-dev \
+            libgl1-mesa-dri \
             libglfw3-dev \
-            libglm-dev
+            libglm-dev \
+            xvfb
 
       - name: Configure
         run: |
@@ -126,12 +138,23 @@ jobs:
       - name: Build
         run: cmake --build build-sanitize --parallel
 
-      - name: Test
+      - name: Test (unit suite)
         # halt_on_error makes UBSan abort on the first report instead of
         # printing and continuing -- without it a job full of undefined
-        # behaviour still passes. detect_leaks enables LeakSanitizer, which
-        # is Linux-only, which is why this job is not in the OS matrix.
+        # behaviour still passes. detect_leaks enables LeakSanitizer, which is
+        # Linux-only, which is why this job is not in the OS matrix.
         env:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           ASAN_OPTIONS: detect_leaks=1
-        run: ctest --test-dir build-sanitize --output-on-failure
+        run: ctest --test-dir build-sanitize --output-on-failure -E linterra_smoke
+
+      - name: Test (GL smoke test)
+        # Run separately, and without detect_leaks. LeakSanitizer is pointed at
+        # Mesa's llvmpipe here, which retains internal allocations the
+        # sanitizer cannot see, so it would report driver-internal blocks as
+        # leaks in the engine. UBSan and ASan's memory-error checks are still
+        # active, which is what matters here: the GL path is covered
+        # nowhere else, and it is where the M12 lifetime defects live.
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: xvfb-run -a ctest --test-dir build-sanitize --output-on-failure -R linterra_smoke

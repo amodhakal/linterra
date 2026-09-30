@@ -226,3 +226,70 @@ if(BUILD_TESTS)
   enable_testing()
   add_test(NAME linterra_tests COMMAND linterra_tests)
 endif()
+
+# ---------------------------------------------------------------------------
+# Headless smoke test
+#
+# The doctest suite above covers the pure math only. This one covers the GL
+# path -- shader compilation, buffer and VAO creation, chunk mesh upload, draw
+# submission, and teardown -- by creating a hidden GLFW window and driving the
+# real engine classes. It needs a windowing system, so on a headless Linux
+# runner it has to be run under xvfb-run.
+#
+# Separate from linterra_tests because it has an entirely different
+# requirement: no GL context versus a real one.
+# ---------------------------------------------------------------------------
+option(BUILD_SMOKE_TEST "Build the headless GL smoke test" ON)
+
+if(BUILD_SMOKE_TEST)
+  # The whole engine except main(), which owns the game's own main(), and
+  # application.cpp, which is the GLFW event-loop and ImGui wiring. The smoke
+  # test drives IRenderer directly, so it does not need the event loop; the
+  # offscreen framebuffer path it would have exercised is reachable through
+  # IRenderer::resizeOffscreenTarget and is called explicitly instead.
+  file(GLOB_RECURSE SMOKE_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
+  list(FILTER SMOKE_SOURCES EXCLUDE REGEX "src/main\\.cpp$")
+  list(FILTER SMOKE_SOURCES EXCLUDE REGEX "src/application\\.cpp$")
+  list(FILTER SMOKE_SOURCES EXCLUDE
+       REGEX "src/(camera|frustum|io|player|threadpool)\\.cpp$")
+
+  add_executable(linterra_smoke
+    tests/smoke_main.cpp
+    ${SMOKE_SOURCES}
+    vendor/glad/src/glad.c
+    vendor/noise/src/noise.cpp
+  )
+
+  target_include_directories(linterra_smoke PRIVATE
+    src
+    vendor/glad/include
+    vendor/noise/include
+    vendor/images/include
+  )
+
+  target_link_libraries(linterra_smoke PRIVATE
+    linterra_warnings
+    linterra_core
+    OpenGL::GL
+    glfw
+    glm::glm
+  )
+
+  # The shader paths in src/config.h are relative and resolve against the
+  # executable's directory, so the smoke binary needs the same asset copy the
+  # game gets.
+  add_custom_command(
+      TARGET linterra_smoke POST_BUILD
+
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+      "$<TARGET_FILE_DIR:linterra_smoke>/resources"
+
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+      "$<TARGET_FILE_DIR:linterra_smoke>/shaders"
+  )
+
+  enable_testing()
+  add_test(NAME linterra_smoke COMMAND linterra_smoke)
+endif()
