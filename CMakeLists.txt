@@ -197,6 +197,7 @@ if(BUILD_TESTS)
     tests/test_packed_vertex.cpp
     tests/test_player.cpp
     tests/test_threadpool.cpp
+    tests/test_texture.cpp
     vendor/noise/src/noise.cpp
   )
 
@@ -205,6 +206,9 @@ if(BUILD_TESTS)
     vendor/doctest/include
     src
     vendor/noise/include
+    # texture.h is included for isPowerOfTwoDimension, which is constexpr and
+    # needs no link, but the header itself pulls in stb_image.
+    vendor/images/include
   )
 
   target_compile_definitions(linterra_tests PRIVATE LINTERRA_NO_OPENGL)
