@@ -36,8 +36,13 @@ code is compiled.
 **Windows**
 
 ```powershell
-vcpkg install glfw3 glm
+vcpkg install glfw3 glm --triplet=x64-windows
+cmake -S . -B build -A x64 -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
 ```
+
+The triplet and the toolchain file are both required — see the
+[Windows section of the README](README.md#prerequisites) for the full
+sequence, including vcpkg bootstrap and the multi-config output path.
 
 ### Build
 

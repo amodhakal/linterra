@@ -46,7 +46,45 @@ sudo apt install libglfw3-dev libglm-dev
 
 **Windows:**
 
-- Install via vcpkg: `vcpkg install glfw3 glm`
+The build needs MSVC >= 19.33 for C++23 `<print>`, and the dependencies come
+from vcpkg. Installing the packages is not enough on its own — `find_package`
+cannot see them until CMake is pointed at the vcpkg toolchain file.
+
+In a *Developer PowerShell* (so MSVC's environment is loaded):
+
+```powershell
+# 1. Get vcpkg and put it on the machine-wide path
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+C:\vcpkg\scripts\bootstrap-vcpkg.bat
+setx VCPKG_ROOT C:\vcpkg
+
+# 2. Install the dependencies, pinned to one triplet.
+#    vcpkg defaults to x86-windows, so the triplet is not optional here.
+C:\vcpkg\vcpkg install glfw3 glm --triplet=x64-windows
+
+# 3. Configure with the toolchain file so find_package(glfw3) resolves
+cmake -S . -B build -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Release --parallel
+.\build\Release\linterra.exe
+```
+
+Notes:
+
+- The toolchain file lives at `%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake`,
+  which is the path vcpkg's own documentation uses. You can also set
+  `CMAKE_TOOLCHAIN_FILE` in a `CMakePresets.json` instead of passing it per
+  invocation.
+- `--triplet=x64-windows` (or `package:x64-windows` per package) matters: vcpkg
+  defaults to `x86-windows`, and a triplet mismatch is the usual cause of
+  `find_package(glfw3)` succeeding but the build failing to link.
+- Visual Studio's generator is multi-config, so the output lands in
+  `build\Release\` rather than `build\`, and `--config Release` is required —
+  `CMAKE_BUILD_TYPE` is ignored by multi-config generators.
+- **Windows is not currently built by CI.** There is no Windows job in
+  `.github/workflows/ci.yml`, so these instructions are unverified by an
+  automated check. Treat them as best-effort and open an issue if they are
+  wrong — adding the runner is tracked separately.
 
 Both the game and the test target configure and build with these commands. CI builds both, so a break in the game binary is caught on every push. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev workflow details.
 
