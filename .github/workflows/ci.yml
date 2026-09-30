@@ -90,3 +90,48 @@ jobs:
 
       - name: Compile shaders
         run: ./scripts/validate-shaders.sh
+
+  sanitizers:
+    # ASan + UBSan over the unit suite. The justfile has supported a
+    # sanitizer build locally via `just dev`, but nothing ran it
+    # automatically, so a use-after-free or undefined operation could sit in
+    # the tree indefinitely.
+    name: Sanitizers (ASan, UBSan)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            clang \
+            libgl1-mesa-dev \
+            libglfw3-dev \
+            libglm-dev
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-sanitize \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON \
+            -DLINTERRA_SANITIZE=address,undefined \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++
+
+      - name: Build
+        run: cmake --build build-sanitize --parallel
+
+      - name: Test
+        # halt_on_error makes UBSan abort on the first report instead of
+        # printing and continuing -- without it a job full of undefined
+        # behaviour still passes. detect_leaks enables LeakSanitizer, which
+        # is Linux-only, which is why this job is not in the OS matrix.
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+          ASAN_OPTIONS: detect_leaks=1
+        run: ctest --test-dir build-sanitize --output-on-failure

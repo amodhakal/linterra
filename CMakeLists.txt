@@ -43,6 +43,27 @@ option(USE_OPENGL "Use OpenGL renderer (currently the only implemented backend)"
 option(USE_METAL "Use Metal renderer (not implemented yet)" OFF)
 option(USE_VULKAN "Use Vulkan renderer (not implemented yet)" OFF)
 
+# Sanitizer support, e.g. -DLINTERRA_SANITIZE=address,undefined
+#
+# An INTERFACE target rather than raw CMAKE_CXX_FLAGS, for two reasons: the
+# flags have to reach the link line as well as the compile line, and this tree
+# contains C sources (vendor/glad/src/glad.c) that CMAKE_CXX_FLAGS would never
+# instrument. Empty by default, so a normal build is unaffected.
+set(LINTERRA_SANITIZE "" CACHE STRING
+    "Comma-separated sanitizers to enable (e.g. address,undefined)")
+if(LINTERRA_SANITIZE)
+  if(MSVC)
+    message(FATAL_ERROR
+      "LINTERRA_SANITIZE is not wired up for MSVC; use /fsanitize=address "
+      "via CMAKE_CXX_FLAGS instead.")
+  endif()
+  add_library(linterra_sanitize INTERFACE)
+  target_compile_options(linterra_sanitize INTERFACE
+    -fsanitize=${LINTERRA_SANITIZE} -fno-omit-frame-pointer -g)
+  target_link_options(linterra_sanitize INTERFACE
+    -fsanitize=${LINTERRA_SANITIZE})
+endif()
+
 if(NOT USE_OPENGL)
   message(WARNING
     "USE_OPENGL=OFF does not currently exclude the OpenGL backend: every "
@@ -101,6 +122,9 @@ target_link_libraries(linterra_core
     PUBLIC glm::glm
     PRIVATE linterra_warnings
 )
+if(LINTERRA_SANITIZE)
+  target_link_libraries(linterra_core PRIVATE linterra_sanitize)
+endif()
 
 # Single source of truth: the glob below already covers everything under
 # src/, including src/renderer/opengl/*. The explicit USE_OPENGL list that used
@@ -132,6 +156,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     glfw
     glm::glm
 )
+if(LINTERRA_SANITIZE)
+  target_link_libraries(${PROJECT_NAME} PRIVATE linterra_sanitize)
+endif()
 
 add_custom_command(
     TARGET ${PROJECT_NAME} POST_BUILD
@@ -187,6 +214,9 @@ if(BUILD_TESTS)
     linterra_core
     glm::glm
   )
+  if(LINTERRA_SANITIZE)
+    target_link_libraries(linterra_tests PRIVATE linterra_sanitize)
+  endif()
 
   enable_testing()
   add_test(NAME linterra_tests COMMAND linterra_tests)

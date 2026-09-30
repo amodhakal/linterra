@@ -23,8 +23,9 @@ build:
   cmake --build {{build_dir}} --parallel
 
 dev:
-  # Debug build with address + UB sanitizers
-  cmake -S . -B {{build_dir}} -DCMAKE_CXX_COMPILER={{cxx}} -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -g"
+  # Debug build with address + UB sanitizers. Same option CI uses
+  # (.github/workflows/ci.yml), so the two cannot drift.
+  cmake -S . -B {{build_dir}} -DCMAKE_CXX_COMPILER={{cxx}} -DCMAKE_BUILD_TYPE=Debug -DLINTERRA_SANITIZE=address,undefined
   cmake --build {{build_dir}} --parallel
 
 test:
