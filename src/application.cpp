@@ -40,7 +40,6 @@ Application::Application(const char* title, const std::uint32_t width, const std
   m_Renderer->setCursorDisabled();
   m_Renderer->setEventContext(this);
   m_Renderer->setCursorPosCallback(handleMouseCallback);
-  m_Renderer->setScrollCallback(handleScrollCallback);
   m_Renderer->setFramebufferSizeCallback(handleResizeCallback);
 
   if (!m_Renderer->loadContextFunctions()) {
@@ -212,9 +211,6 @@ void Application::processMouseInput(double xPosition, double yPosition) {
   return m_Player.processMouseInput(xPosition, yPosition);
 }
 
-void Application::processScrollInput([[maybe_unused]] double xOffset,
-                                   [[maybe_unused]] double yOffset) {}
-
 void Application::handleKeyPress(float deltaTime) {
   if (m_Renderer->isKeyPressed(Key::Escape)) {
     m_Renderer->setWindowShouldClose(true);
@@ -237,10 +233,4 @@ void Application::handleMouseCallback(void* context, double xPosition,
                                       double yPosition) {
   auto* application = static_cast<Application*>(context);
   application->processMouseInput(xPosition, yPosition);
-}
-
-void Application::handleScrollCallback(void* context, double xOffset,
-                                      double yOffset) {
-  auto* application = static_cast<Application*>(context);
-  application->processScrollInput(xOffset, yOffset);
 }

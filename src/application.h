@@ -41,12 +41,9 @@ class Application {
   float getDeltaTime();
 
   void processMouseInput(double xPosition, double yPosition);
-  void processScrollInput(double xOffset, double yOffset);
 
   void handleKeyPress(float deltaTime);
   static void handleResizeCallback(void* context, int width, int height);
   static void handleMouseCallback(void* context, double xPosition,
                                   double yPosition);
-  static void handleScrollCallback(void* context, double xOffset,
-                                   double yOffset);
 };
