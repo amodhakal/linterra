@@ -206,6 +206,25 @@ int main() {
       Chunk chunk(renderer.get());
       const glm::ivec2 position{0, 0};
 
+      // A freshly constructed chunk's heightmaps are uninitialised in the
+      // shipped code. They are read as neighbour heights by isBlockExposed, so
+      // anything that touches a chunk before generating its heightmap was
+      // reading indeterminate values. This needs a real renderer, which is why
+      // it lives here rather than in the unit suite.
+      {
+        int nonZero = 0;
+        for (int bx = 0; bx < Constants::Chunk::LENGTH; ++bx) {
+          for (int bz = 0; bz < Constants::Chunk::LENGTH; ++bz) {
+            if (chunk.getHighestBlockY(static_cast<std::uint32_t>(bx),
+                                       static_cast<std::uint32_t>(bz)) != 0) {
+              ++nonZero;
+            }
+          }
+        }
+        Report("a fresh chunk's heightmap reads as all-zero", nonZero == 0,
+               std::to_string(nonZero) + " cells were non-zero");
+      }
+
       chunk.generateHeightMapCPU(position);
       Report("chunk heightmap (CPU)", true);
 
