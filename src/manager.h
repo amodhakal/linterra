@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -93,6 +94,14 @@ private:
   // on a per-chunk pipeline sync.
   static constexpr uint32_t kGpuSlots = 64;
   uint32_t m_NextGpuSlot = 0;
+
+  // Cap on how many meshing tasks may sit in the pool's queue at once. The
+  // render window spans (2 * RENDER_DISTANCE_CHUNKS + 1)^2 == 4225 chunk
+  // slots, so a cap well below that lets streaming fill in steadily instead
+  // of flooding the pool with thousands of tasks on the first frame. Chunks
+  // that miss the cap are retried on a later frame.
+  static constexpr std::size_t kMaxPendingTasks = 1024;
+
   std::unordered_map<glm::ivec2, Chunk> m_ProcessedChunks;
   std::unordered_set<glm::ivec2> m_ProcessingPositions;
 

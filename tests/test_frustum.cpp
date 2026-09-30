@@ -2,7 +2,7 @@
 
 #include "camera.h"
 #include "config.h"
-#include "Frustum.h"
+#include "frustum.h"
 
 #include <glm/glm.hpp>
 

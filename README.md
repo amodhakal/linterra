@@ -258,7 +258,7 @@ The initial milestone focused on building the foundation required for an infinit
   - **FastNoise-style noise** — procedural terrain (vendored)
   - **doctest** — unit testing (vendored)
 
-> Note: SDL3 appears in some historical build configs but the current codebase is GLFW-only — the windowing backend lives entirely in the OpenGL renderer (`glfwInit`, `ImGui_ImplGlfw_InitForOpenGL`).
+> Note: SDL3 is not a dependency. The windowing backend lives entirely in the OpenGL renderer via GLFW (`glfwInit`, `ImGui_ImplGlfw_InitForOpenGL`); earlier revisions of `CMakeLists.txt` still referenced SDL3 and the ImGui SDL3 backend, which has since been removed.
 
 ---
 
@@ -287,7 +287,7 @@ sudo apt install libglfw3-dev libglm-dev
 
 - Install via vcpkg: `vcpkg install glfw3 glm`
 
-> ⚠️ Known issue: as of this writing, `main`'s `CMakeLists.txt` still compiles `imgui_impl_sdl3.cpp` and links SDL3 while `src/application.cpp` uses the ImGui GLFW backend. Until that mismatch is fixed upstream, building the game target requires either installing SDL3 or adjusting those two CMake entries. The `linterra_tests` target is unaffected and builds headlessly. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev workflow details.
+Both the game and the test target configure and build with these commands. CI builds both, so a break in the game binary is caught on every push. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev workflow details.
 
 ### Build
 

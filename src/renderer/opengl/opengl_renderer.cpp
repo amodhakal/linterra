@@ -163,13 +163,15 @@ void OpenGLRenderer::terminateWindowing() {
 void OpenGLRenderer::configureWindowHints() {
   // The compute path (GLSL compute shaders) requires OpenGL 4.3; on Apple the
   // max core profile is 4.1 and the GPU path is disabled, so request 3.3.
-#if defined(__APPLE__) || !Constants::Noise::USE_GPU
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  // USE_GPU is a constexpr, which the preprocessor can't see, so the branch
+  // stays in C++ and only the __APPLE__ half lives in an #if.
+#if defined(__APPLE__)
+  constexpr int kContextMajor = 3;
 #else
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+  constexpr int kContextMajor = Constants::Noise::USE_GPU ? 4 : 3;
 #endif
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, kContextMajor);
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
 #if defined(__APPLE__)

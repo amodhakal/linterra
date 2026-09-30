@@ -1,4 +1,4 @@
-#include "Frustum.h"
+#include "frustum.h"
 
 #include "config.h"
 

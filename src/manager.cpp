@@ -11,7 +11,7 @@
 
 #include "chunk.h"
 #include "config.h"
-#include "Frustum.h"
+#include "frustum.h"
 #include "renderer/renderer.hpp"
 
 namespace {
@@ -100,6 +100,11 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
         m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
         result.chunk.finishHeightMapGPU(result.slot, *m_HeightMapSSBO);
         result.chunk.generateMesh();
+        // The worker only flags meshReady on this path; the mesh itself is
+        // built here, so this is the point where the chunk is ready to upload.
+        // Without it the chunk would be re-meshed every frame and never
+        // promoted out of m_ProcessingChunks.
+        result.uploadReady.store(true, std::memory_order_release);
       }
     }
 
@@ -110,13 +115,18 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
 
     const glm::ivec2 position = it->first;
 
-    // Range-check before generating/uploading work: if the camera has moved
-    // away since this task was enqueued, discard the chunk here instead of
-    // paying the GPU upload cost and cleaning it up on a later frame.
+    // Range-check before uploading: if the camera has moved away since this
+    // task was enqueued, discard the chunk here instead of paying the GPU
+    // upload cost. This is only safe now that uploadReady is set — it is the
+    // worker's final action, so no task can still be touching `result`.
+    // Erasing earlier would leave the worker meshing into freed memory.
     if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
-      std::lock_guard<std::mutex> lock(m_ProcessingMutex);
-      m_ProcessingPositions.erase(position);
-      it = m_ProcessingChunks.erase(it);
+      result.chunk.cleanup();
+      {
+        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+        m_ProcessingPositions.erase(position);
+        it = m_ProcessingChunks.erase(it);
+      }
       continue;
     }
 
@@ -164,23 +174,41 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       }
 
       TaskResult &result = *resultPtr;
-      if (Constants::Noise::USE_GPU && m_HeightMapSSBO && m_ComputeShader.getId() != 0) {
-        // Batched GPU path: dispatch into this chunk's slot of the shared
-        // SSBO and defer both meshing and readback. The main thread never
-        // blocks on a per-chunk GPU sync here; the readback happens later,
-        // once the slot has been given a full frame to complete.
-        const uint32_t slot = m_NextGpuSlot++ % kGpuSlots;
-        result.slot = slot;
-        m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
-        result.chunk.generateHeightMapGPU(position, slot, m_ComputeShader);
-        enqueued = m_ThreadPool.tryEnqueue([&result]() {
-          result.meshReady.store(true, std::memory_order_release);
-        }, kMaxPendingTasks);
-      } else {
-        m_ThreadPool.enqueue([&result, position]() {
-          result.chunk.generateMeshData(position);
-          result.uploadReady.store(true, std::memory_order_release);
-        });
+      const bool enqueued = [&] {
+        if (Constants::Noise::USE_GPU && m_HeightMapSSBO &&
+            m_ComputeShader.getId() != 0) {
+          // Batched GPU path: dispatch into this chunk's slot of the shared
+          // SSBO and defer both meshing and readback. The main thread never
+          // blocks on a per-chunk GPU sync here; the readback happens later,
+          // once the slot has been given a full frame to complete.
+          const uint32_t slot = m_NextGpuSlot++ % kGpuSlots;
+          result.slot = slot;
+          m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
+          result.chunk.generateHeightMapGPU(position, slot, m_ComputeShader);
+          return m_ThreadPool.tryEnqueue(
+              [&result]() {
+                result.meshReady.store(true, std::memory_order_release);
+              },
+              kMaxPendingTasks);
+        }
+
+        return m_ThreadPool.tryEnqueue(
+            [&result, position]() {
+              result.chunk.generateMeshData(position);
+              result.uploadReady.store(true, std::memory_order_release);
+            },
+            kMaxPendingTasks);
+      }();
+
+      if (!enqueued) {
+        // The pool is at its backlog cap. Drop the placeholder entry so the
+        // chunk is retried on a later frame; leaving it in place would strand
+        // the position in m_ProcessingPositions forever, since nothing will
+        // ever flag the chunk ready. Safe to erase now precisely because no
+        // task was queued and therefore none holds a reference to `result`.
+        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+        m_ProcessingChunks.erase(position);
+        m_ProcessingPositions.erase(position);
       }
     }
   }

@@ -5,6 +5,7 @@
 #include <glm/vec4.hpp>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 enum class BufferType : uint8_t {
@@ -200,3 +201,7 @@ class IRenderer {
 };
 
 std::unique_ptr<IRenderer> createRenderer(RenderBackend backend);
+
+// Human-readable name for a code returned by IRenderer::getLastError(), so
+// the numeric value doesn't have to be looked up by hand.
+std::string_view describeGlError(std::uint32_t error);

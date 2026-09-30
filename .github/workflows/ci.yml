@@ -21,7 +21,7 @@ jobs:
             cmake \
             clang \
             libgl1-mesa-dev \
-            libsdl3-dev \
+            libglfw3-dev \
             libglm-dev
 
       - name: Configure
@@ -32,7 +32,9 @@ jobs:
             -DBUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --target linterra_tests -j"$(nproc)"
+        # Build the default target set, not just linterra_tests, so a broken
+        # game build can't reach main green.
+        run: cmake --build build -j"$(nproc)"
 
       - name: Test
         # ctest returns non-zero if any test fails, which fails the job and
