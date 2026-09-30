@@ -416,6 +416,12 @@ void Chunk::render() {
   }
 }
 
-uint16_t Chunk::getHighestBlockY(uint32_t blockX, uint32_t blockZ) {
+uint16_t Chunk::getHighestBlockY(uint32_t blockX, uint32_t blockZ) const {
+  // The heightmap is exactly LENGTH x LENGTH, so anything outside that is
+  // already past the end of the array. Clamping would quietly answer with a
+  // neighbouring column's height, which is worse than failing.
+  assert(blockX < static_cast<uint32_t>(Constants::Chunk::LENGTH) &&
+         blockZ < static_cast<uint32_t>(Constants::Chunk::LENGTH) &&
+         "getHighestBlockY called with an out-of-range block coordinate");
   return m_HeightMap[blockX][blockZ];
 }

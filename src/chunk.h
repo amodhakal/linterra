@@ -132,7 +132,14 @@ public:
    *  moved-from chunk retains its (now stale) heightmap values; they are
    *  safe to read but must be regenerated before reuse. */
 
-  uint16_t getHighestBlockY(uint32_t blockX, uint32_t blockZ);
+  /** Solid surface height for a block, in world Y.
+   *
+   *  Precondition: blockX and blockZ must both be in [0, LENGTH). The
+   *  heightmap is indexed directly and is LENGTH x LENGTH, so an
+   *  out-of-range index reads whatever is past the array. Asserted rather
+   *  than clamped -- silently returning a neighbouring column's height would
+   *  turn a caller bug into terrain that is subtly wrong instead of a crash. */
+  uint16_t getHighestBlockY(uint32_t blockX, uint32_t blockZ) const;
 
   static constexpr uint32_t kExtSide =
       static_cast<uint32_t>(Constants::Chunk::LENGTH) + 2u;
@@ -150,10 +157,21 @@ private:
   std::vector<PackedVertex> m_Data;
   std::vector<uint32_t> m_Indices;
 
-  uint16_t m_HeightMap[Constants::Chunk::LENGTH][Constants::Chunk::LENGTH];
+  // Value-initialised in the declaration rather than in the constructor
+  // initialiser list, so every construction path is covered -- default
+  // construction, the move constructor, and move assignment. The move
+  // operations bulk-copy these arrays over the zeros, so the initialisation
+  // only costs anything on a genuinely fresh chunk.
+  //
+  // These were previously uninitialised. A TaskResult places a Chunk in an
+  // unordered_map and the heightmaps are read as neighbour heights by
+  // isBlockExposed, so a chunk whose heightmap had not been generated yet was
+  // reading indeterminate values.
+  uint16_t m_HeightMap[Constants::Chunk::LENGTH]
+                      [Constants::Chunk::LENGTH]{};
 
   /** Halo for neighbor lookups: local block (lx,lz) in [-1, LENGTH] maps to [(uint32_t)lx + 1]. */
-  uint16_t m_ExtendedHeightMap[kExtSide][kExtSide];
+  uint16_t m_ExtendedHeightMap[kExtSide][kExtSide]{};
 
   /** True after the deferred GPU readback has filled the height maps. */
   bool m_GpuHeightMapReady = false;
