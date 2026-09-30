@@ -6,6 +6,109 @@ Linterra is a from-scratch, Minecraft-style voxel engine written in modern C++ a
 
 ![Screenshot of the game](docs/screenshot.png)
 
+## Technical Stack
+
+- **Language:** C++23
+- **Graphics:** OpenGL 3.3+ on Apple / non-GPU-noise platforms; OpenGL 4.3+ elsewhere (GPU compute terrain path). Rendering goes through an `IRenderer` abstraction layer (`src/renderer/`) with an OpenGL backend in `src/renderer/opengl/`.
+- **Libraries:**
+  - **GLFW** — windowing & input
+  - **GLAD** — OpenGL function loading (vendored)
+  - **GLM** — mathematical foundations (matrices, vectors)
+  - **Dear ImGui** — debug UI (vendored)
+  - **stb_image** — texture loading (vendored)
+  - **FastNoise-style noise** — procedural terrain (vendored)
+  - **doctest** — unit testing (vendored)
+
+> Note: SDL3 is not a dependency. The windowing backend lives entirely in the OpenGL renderer via GLFW (`glfwInit`, `ImGui_ImplGlfw_InitForOpenGL`); earlier revisions of `CMakeLists.txt` still referenced SDL3 and the ImGui SDL3 backend, which has since been removed.
+
+---
+
+## Building & Running
+
+### Prerequisites
+
+- macOS 12+ / Linux / Windows 10+
+- C++23-capable compiler (Clang, GCC, or MSVC)
+- CMake 3.16+
+- [just](https://github.com/casey/just) (optional — convenience recipes)
+
+**macOS (Homebrew):**
+
+```bash
+brew install glfw glm
+```
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+sudo apt install libglfw3-dev libglm-dev
+```
+
+**Windows:**
+
+- Install via vcpkg: `vcpkg install glfw3 glm`
+
+Both the game and the test target configure and build with these commands. CI builds both, so a break in the game binary is caught on every push. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev workflow details.
+
+### Build
+
+With CMake directly:
+
+```bash
+git clone https://github.com/amodhakal/linterra.git
+cd linterra
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+```
+
+Or with `just` (see `justfile` for all recipes):
+
+```bash
+just build    # release build
+just dev      # debug build with sanitizers
+```
+
+### Run
+
+```bash
+./build/linterra
+```
+
+### Unit Tests
+
+The pure (no-GL-context) subsystems — procedural noise, camera math, and
+frustum culling — have a doctest-based unit suite in `tests/`. The test
+executable is built alongside the game and requires only GLM (no OpenGL/GLFW
+runtime), so it can run in headless CI.
+
+```bash
+# configure + build everything (tests are ON by default)
+cmake -S . -B build
+cmake --build build
+
+# build + run the suite directly, or via ctest
+cmake --build build --target linterra_tests
+./build/linterra_tests
+ctest --test-dir build --output-on-failure
+```
+
+Or simply:
+
+```bash
+just test
+```
+
+To omit the test target (e.g. when only building the game):
+
+```bash
+cmake -S . -B build -DBUILD_TESTS=OFF
+```
+
+The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
+— no extra dependency to fetch.
+
+---
+
 ## Implemented Features
 
 ### Milestone 9 — GPU-Accelerated Terrain Generation & Platform-Adaptive Noise Fallback
@@ -242,106 +345,3 @@ The initial milestone focused on building the foundation required for an infinit
 - Window and input via GLFW
 - OpenGL loading via GLAD
 - Core render loop with event dispatching and input callbacks
-
----
-
-## Technical Stack
-
-- **Language:** C++23
-- **Graphics:** OpenGL 3.3+ on Apple / non-GPU-noise platforms; OpenGL 4.3+ elsewhere (GPU compute terrain path). Rendering goes through an `IRenderer` abstraction layer (`src/renderer/`) with an OpenGL backend in `src/renderer/opengl/`.
-- **Libraries:**
-  - **GLFW** — windowing & input
-  - **GLAD** — OpenGL function loading (vendored)
-  - **GLM** — mathematical foundations (matrices, vectors)
-  - **Dear ImGui** — debug UI (vendored)
-  - **stb_image** — texture loading (vendored)
-  - **FastNoise-style noise** — procedural terrain (vendored)
-  - **doctest** — unit testing (vendored)
-
-> Note: SDL3 is not a dependency. The windowing backend lives entirely in the OpenGL renderer via GLFW (`glfwInit`, `ImGui_ImplGlfw_InitForOpenGL`); earlier revisions of `CMakeLists.txt` still referenced SDL3 and the ImGui SDL3 backend, which has since been removed.
-
----
-
-## Building & Running
-
-### Prerequisites
-
-- macOS 12+ / Linux / Windows 10+
-- C++23-capable compiler (Clang, GCC, or MSVC)
-- CMake 3.16+
-- [just](https://github.com/casey/just) (optional — convenience recipes)
-
-**macOS (Homebrew):**
-
-```bash
-brew install glfw glm
-```
-
-**Linux (Debian/Ubuntu):**
-
-```bash
-sudo apt install libglfw3-dev libglm-dev
-```
-
-**Windows:**
-
-- Install via vcpkg: `vcpkg install glfw3 glm`
-
-Both the game and the test target configure and build with these commands. CI builds both, so a break in the game binary is caught on every push. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev workflow details.
-
-### Build
-
-With CMake directly:
-
-```bash
-git clone https://github.com/amodhakal/linterra.git
-cd linterra
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-```
-
-Or with `just` (see `justfile` for all recipes):
-
-```bash
-just build    # release build
-just dev      # debug build with sanitizers
-```
-
-### Run
-
-```bash
-./build/linterra
-```
-
-### Unit Tests
-
-The pure (no-GL-context) subsystems — procedural noise, camera math, and
-frustum culling — have a doctest-based unit suite in `tests/`. The test
-executable is built alongside the game and requires only GLM (no OpenGL/GLFW
-runtime), so it can run in headless CI.
-
-```bash
-# configure + build everything (tests are ON by default)
-cmake -S . -B build
-cmake --build build
-
-# build + run the suite directly, or via ctest
-cmake --build build --target linterra_tests
-./build/linterra_tests
-ctest --test-dir build --output-on-failure
-```
-
-Or simply:
-
-```bash
-just test
-```
-
-To omit the test target (e.g. when only building the game):
-
-```bash
-cmake -S . -B build -DBUILD_TESTS=OFF
-```
-
-The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
-— no extra dependency to fetch.
