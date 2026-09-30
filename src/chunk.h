@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 #include <memory>
 #include <vector>
 
@@ -21,6 +23,54 @@ enum BlockNormal : uint8_t {
   BOTTOM_NORMAL = 2,
   TOP_NORMAL = 3
 };
+
+/** The two edge vectors a face is built from, plus the outward normal that
+ *  winding is required to produce.
+ *
+ *  Chunk::addQuad emits its first triangle as (a, a+dv, a+du), so the
+ *  right-hand-rule normal of that triangle is dv x du, i.e. -(du x dv). With
+ *  GL_CULL_FACE enabled and the default GL_CCW front-face convention, a quad
+ *  is only visible from outside the block if that normal equals the face's
+ *  outward normal. Getting this backwards does not look like a bug -- the
+ *  geometry is still there, it is just culled -- so the requirement is stated
+ *  here next to the vectors it constrains and asserted in the test suite.
+ *
+ *  `outX/outY/outZ` is deliberately carried rather than recomputed by the
+ *  caller, so the test compares the winding against an independent statement
+ *  of intent instead of re-deriving the same formula twice. */
+struct FaceWinding {
+  int32_t duX, duY, duZ;
+  int32_t dvX, dvY, dvZ;
+  int32_t outX, outY, outZ;
+};
+
+/** Winding table for the six face directions (0..5) used by generateMeshData.
+ *  Throws std::out_of_range for any other direction.
+ *
+ *  Defined inline in the header rather than in chunk.cpp so the unit suite can
+ *  assert the winding without linking chunk.cpp, which needs a renderer. */
+inline FaceWinding faceWindingForDirection(int direction) {
+  switch (direction) {
+    case 0:  // +X
+      return {0, 0, 1, 0, 1, 0, 1, 0, 0};
+    case 1:  // -X
+      return {0, 1, 0, 0, 0, 1, -1, 0, 0};
+    case 2:  // +Y
+      return {1, 0, 0, 0, 0, 1, 0, 1, 0};
+    case 3:  // -Y
+      // du and dv are swapped relative to face 2. That is the fix: the pair
+      // (1,0,0) x (0,0,1) gives +Y, and -(1,0,0) x (0,0,1) is -Y only if the
+      // cross is taken the other way round, which the edge order controls.
+      return {0, 0, 1, 1, 0, 0, 0, -1, 0};
+    case 4:  // +Z
+      return {0, 1, 0, 1, 0, 0, 0, 0, 1};
+    case 5:  // -Z
+      return {1, 0, 0, 0, 1, 0, 0, 0, -1};
+    default:
+      throw std::out_of_range("invalid face direction: " +
+                              std::to_string(direction));
+  }
+}
 
 // Packs a chunk vertex into a single uint32_t (see README, Milestone 4).
 // The field struct is named rather than anonymous: an anonymous struct inside

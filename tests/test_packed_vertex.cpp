@@ -1,4 +1,7 @@
 #include <cstdint>
+#include <cstring>
+#include <set>
+#include <stdexcept>
 #include <type_traits>
 
 #include "chunk.h"
@@ -9,6 +12,15 @@
 // would corrupt every mesh while still compiling cleanly. These tests pin the
 // layout.
 //
+// Orderable ivec3 for the set comparisons below.
+struct Vec3Less {
+  bool operator()(const glm::ivec3& a, const glm::ivec3& b) const {
+    if (a.x != b.x) return a.x < b.x;
+    if (a.y != b.y) return a.y < b.y;
+    return a.z < b.z;
+  }
+};
+
 // The field struct is named (`f`) rather than anonymous; an anonymous struct
 // inside a union is a GNU extension and would trip -Wpedantic.
 
@@ -117,4 +129,74 @@ TEST_CASE("PackedVertex is 32 bits wide with no padding") {
   v.bits = 0xFFFFFFFFu;
   CHECK(v.bits == 0xFFFFFFFFu);
   CHECK(sizeof(v) == sizeof(std::uint32_t));
+}
+
+// ---------------------------------------------------------------------------
+// Face winding (#140)
+//
+// addQuad emits its first triangle as (a, a+dv, a+du), so that triangle's
+// right-hand-rule normal is dv x du = -(du x dv). With GL_CULL_FACE enabled and
+// the default GL_CCW front-face convention, a quad is visible from outside the
+// block only when that normal equals the face's outward normal.
+//
+// Getting this backwards is invisible: the geometry is still emitted, it is
+// just culled, so the world quietly loses every bottom face. Nothing else in
+// the build notices.
+// ---------------------------------------------------------------------------
+
+TEST_SUITE("FaceWinding") {
+  namespace {
+  glm::ivec3 windingNormal(const FaceWinding& w) {
+    const glm::vec3 du(w.duX, w.duY, w.duZ);
+    const glm::vec3 dv(w.dvX, w.dvY, w.dvZ);
+    const glm::ivec3 n = glm::ivec3(-glm::cross(du, dv));
+    return n;
+  }
+  }  // namespace
+
+  TEST_CASE("every face winding produces its outward normal") {
+    // The table carries the intended outward normal, so this compares the
+    // winding against an independent statement of intent rather than
+    // re-deriving the same formula on both sides.
+    for (int direction = 0; direction < 6; ++direction) {
+      const FaceWinding w = faceWindingForDirection(direction);
+      CAPTURE(direction);
+      CHECK(windingNormal(w) == glm::ivec3(w.outX, w.outY, w.outZ));
+    }
+  }
+
+  TEST_CASE("the six face windings are the six distinct axis directions") {
+    // Each face must point somewhere different, and the set must be exactly
+    // the six axis directions. A duplicate here is how two faces end up wound
+    // the same way and one of them silently disappears.
+    std::set<glm::ivec3, Vec3Less> normals;
+    for (int direction = 0; direction < 6; ++direction) {
+      normals.insert(windingNormal(faceWindingForDirection(direction)));
+    }
+
+    REQUIRE(normals.size() == 6);
+    const std::set<glm::ivec3, Vec3Less> expected{
+        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+    CHECK(normals == expected);
+  }
+
+  TEST_CASE("the bottom face points down") {
+    // The specific regression. Face 3 previously reused face 2's edge vectors,
+    // so a -Y face was wound to produce a +Y normal and was back-face culled
+    // from every angle.
+    const FaceWinding bottom = faceWindingForDirection(3);
+    CHECK(windingNormal(bottom) == glm::ivec3(0, -1, 0));
+    CHECK(glm::ivec3(bottom.outX, bottom.outY, bottom.outZ) ==
+          glm::ivec3(0, -1, 0));
+    // And it must not be the top face's winding.
+    const FaceWinding top = faceWindingForDirection(2);
+    CHECK(std::memcmp(&bottom, &top, sizeof(FaceWinding)) != 0);
+  }
+
+  TEST_CASE("an invalid face direction is rejected") {
+    // Better a throw at the call site than a silently zero winding, which would
+    // produce a degenerate normal and a face that is never culled.
+    CHECK_THROWS_AS(faceWindingForDirection(6), std::out_of_range);
+    CHECK_THROWS_AS(faceWindingForDirection(-1), std::out_of_range);
+  }
 }
