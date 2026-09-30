@@ -76,7 +76,14 @@ jobs:
         if: runner.os == 'macOS'
         # ctest returns non-zero if any test fails, which fails the job and
         # blocks the push/merge.
-        run: ctest --test-dir build --output-on-failure
+        #
+        # linterra_smoke is excluded here: a GitHub macOS runner has no window
+        # server session, so glfwCreateWindow returns null and no CGL context
+        # can be created at all. The job still does its real job -- compiling
+        # every __APPLE__ branch on the primary development platform and
+        # running the unit suite -- and the GL path is covered by the Linux leg
+        # under xvfb instead.
+        run: ctest --test-dir build --output-on-failure -E linterra_smoke
 
   validate-shaders:
     # Shaders are compiled by the driver at runtime, so a syntax error in one

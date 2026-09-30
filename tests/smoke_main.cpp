@@ -111,8 +111,14 @@ int main() {
 
     if (!renderer->createWindow(64, 64, "linterra-smoke")) {
       std::printf(
-          "  FAIL  createWindow: no GL context available. On a headless Linux "
-          "runner this needs xvfb-run with software rendering.\n");
+          "  FAIL  createWindow: the platform provided no GL context.\n"
+          "        This test needs a windowing system with a GL-capable\n"
+          "        driver. Known environments:\n"
+          "          Linux CI   -> run under `xvfb-run` with Mesa software\n"
+          "                       rendering (libgl1-mesa-dri installed)\n"
+          "          macOS CI   -> not possible: the runner has no window\n"
+          "                       server session, so no CGL context exists\n"
+          "          macOS local-> works, a hidden window is enough\n");
       return EXIT_FAILURE;
     }
     Report("createWindow (hidden)", true);
