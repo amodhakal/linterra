@@ -161,7 +161,7 @@ TEST_CASE("ThreadPool tryEnqueue refuses work past the pending cap") {
   CHECK(accepted > 0);
 }
 
-TEST_CASE("ThreadPool spreads work across worker threads") {
+TEST_CASE("ThreadPool runs every task exactly once") {
   struct State {
     std::mutex mutex;
     std::set<std::thread::id> ids;
@@ -187,7 +187,22 @@ TEST_CASE("ThreadPool spreads work across worker threads") {
   }  // destruction drains and joins
 
   CHECK(state->done.load() == kTasks);
-  // A pool of max(2, hardware_concurrency) workers cannot run 400 trivial
-  // tasks entirely on one thread, so more than one id must appear.
-  CHECK(state->ids.size() > 1);
+
+  // NOTE: this test used to assert state->ids.size() > 1, on the reasoning
+  // that a pool of max(2, hardware_concurrency) workers "cannot" run 400
+  // trivial tasks on one thread. That reasoning is wrong. A worker that is
+  // already running can drain the entire queue before a second worker is
+  // scheduled onto a busy machine -- and that is exactly what happens on a
+  // loaded CI runner. The assertion passed locally 10/10 and then failed on
+  // the GitHub macOS runner, where it is a false positive, not a real defect.
+  //
+  // Genuine concurrency is asserted deterministically by the bounded-blocking
+  // test above ("ThreadPool runs tasks on more than one thread"), which cannot
+  // pass unless a second worker picks up a second task. Recording the thread
+  // ids here is still useful -- it feeds a diagnostic below -- but it is not
+  // something to assert on.
+  if (state->ids.size() <= 1) {
+    MESSAGE("all " << kTasks << " tasks ran on "
+                   << state->ids.size() << " thread(s); not asserted on");
+  }
 }
