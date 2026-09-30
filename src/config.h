@@ -29,7 +29,6 @@ constexpr std::uint32_t SCR_HEIGHT = 600;
 constexpr auto BG_COLOR = glm::vec4(0.3, 0.5, 0.6, 1.0);
 constexpr auto FOG_COLOR = glm::vec3(0.3, 0.5, 0.6);
 
-constexpr bool DO_TRIANGLE_LINE = false;
 constexpr bool DO_GRAVITY = false;
 
 namespace Camera {

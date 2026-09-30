@@ -1,0 +1,113 @@
+# clang-tidy configuration for Linterra.
+#
+# Two jobs here. First, a checked-in baseline so `just tidy` and
+# `just tidy-build` analyse against a deliberate check set rather than
+# clang-tidy's defaults, which nobody chose. Second, an explicit statement of
+# the project's naming convention, so the linter enforces it on new code
+# instead of the convention living only in contributors' heads.
+#
+# Run with:  just tidy        (over an existing build tree)
+#        or  just tidy-build  (configures a build with clang-tidy attached)
+#
+# This is advisory, not a build gate: nothing in CI runs clang-tidy, and the
+# warning flags in CMakeLists.txt (via linterra_warnings) are what actually
+# gate a merge. See CONTRIBUTING.md.
+
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-identifier-naming
+
+# Excluded on purpose, from the families enabled above:
+#   bugprone-easily-swappable-parameters  - fires on every setter-shaped
+#                                          signature in the renderer interface
+#   bugprone-exception-escape             - internal paths deliberately let
+#                                          exceptions reach a handler
+#   performance-*                         - enabled; the only member of this
+#                                          family likely to need tuning is
+#                                          unnecessary-value-param, which
+#                                          flags large by-value Chunk and
+#                                          TaskResult parameters that the
+#                                          design intends.
+
+FormatStyle: file
+
+HeaderFilterRegex: 'src/.*'
+
+# ---------------------------------------------------------------------------
+# Naming convention
+#
+# Derived from what the tree already does, not from an external house style.
+# Surveyed before writing this file:
+#
+#   - 75 of the 77 m_-prefixed members already used PascalCase after the
+#     prefix, so m_ + PascalCase is what is declared. The two outliers
+#     (m_firstFrame, m_lastFrame) were renamed in the same change rather than
+#     being exempted here.
+#   - Functions are consistently lowerCamelCase, and so are parameters,
+#     locals, and variables. Note this differs from Google style, which
+#     .clang-format is based on and which would use snake_case for variables --
+#     the formatter config controls whitespace and line breaks, not names, so
+#     the two do not conflict, but clang-format will not fix naming for you.
+#   - Constants in src/config.h are UPPER_CASE.
+#   - Scoped enum values are CamelCase (RenderBackend::OpenGL,
+#     BufferType::Vertex, PrimitiveType::Triangles).
+#
+# Two known deviations are left in place, because renaming them is a wider
+# change than this config should make on its own:
+#
+#   - The IO namespace is all-caps. IO::resolvePath and IO::getFullFileContents
+#     are its only members.
+#   - The two unscoped enums (BlockType, BlockNormal in src/chunk.h) use
+#     UPPER_CASE values while every scoped enum uses CamelCase. BlockNormal
+#     values are baked into the PackedVertex bitfield, so they are left alone.
+# ---------------------------------------------------------------------------
+
+CheckOptions:
+  # Types
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.NamespaceCase: CamelCase
+
+  # Data members: m_ prefix + PascalCase, whatever the access level.
+  readability-identifier-naming.MemberPrefix: m_
+  readability-identifier-naming.MemberCase: CamelCase
+  readability-identifier-naming.PublicMemberPrefix: m_
+  readability-identifier-naming.PublicMemberCase: CamelCase
+  readability-identifier-naming.PrivateMemberPrefix: m_
+  readability-identifier-naming.PrivateMemberCase: CamelCase
+  readability-identifier-naming.ProtectedMemberPrefix: m_
+  readability-identifier-naming.ProtectedMemberCase: CamelCase
+
+  # Functions: lowerCamelCase
+  readability-identifier-naming.FunctionCase: camelBack
+  readability-identifier-naming.MethodCase: camelBack
+  readability-identifier-naming.FreeFunctionCase: camelBack
+  readability-identifier-naming.StaticFunctionCase: camelBack
+  readability-identifier-naming.StaticMethodCase: camelBack
+
+  # Parameters, variables, and locals: lowerCamelCase
+  readability-identifier-naming.ParameterCase: camelBack
+  readability-identifier-naming.VariableCase: camelBack
+  readability-identifier-naming.LocalVariableCase: camelBack
+  readability-identifier-naming.GlobalVariableCase: camelBack
+  readability-identifier-naming.GlobalPointerCase: camelBack
+  readability-identifier-naming.GlobalFunctionCase: camelBack
+  readability-identifier-naming.LocalConstantCase: camelBack
+  readability-identifier-naming.ClassConstantCase: UPPER_CASE
+  readability-identifier-naming.ClassMemberCase: m_CamelCase
+
+  # Constants: UPPER_CASE, matching src/config.h
+  readability-identifier-naming.ConstantCase: UPPER_CASE
+  readability-identifier-naming.ConstantMemberCase: UPPER_CASE
+  readability-identifier-naming.GlobalConstantCase: UPPER_CASE
+  readability-identifier-naming.GlobalConstantPointerCase: UPPER_CASE
+  readability-identifier-naming.GlobalConstantReferenceCase: UPPER_CASE
+
+  # Scoped enum values: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase

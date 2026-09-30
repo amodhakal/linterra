@@ -26,12 +26,6 @@ Camera::Camera(glm::vec3 position) {
   m_IsFirstMouse = true;
 }
 
-// void Camera::processScrollInput(double xOffset, double yOffset) {
-//   m_Fov -= yOffset;
-//   m_Fov = fmax(m_Fov, Constants::Camera::FOV_MIN);
-//   m_Fov = fmin(m_Fov, Constants::Camera::FOV_MAX);
-// }
-
 glm::mat4 Camera::getView() {
   return glm::lookAt(m_Position, m_Position + m_Front, m_Up);
 }

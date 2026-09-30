@@ -412,10 +412,6 @@ void Chunk::pass() {
   m_Renderer->setVertexAttribute(*m_VAO, 0, 1, DataType::UnsignedInt, false,
                                 sizeof(PackedVertex), 0);
   m_Renderer->enableVertexAttribute(*m_VAO, 0);
-
-  if (Constants::DO_TRIANGLE_LINE) {
-    m_Renderer->setPolygonMode(true);
-  }
 }
 
 void Chunk::cleanup() {

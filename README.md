@@ -41,12 +41,50 @@ brew install glfw glm
 **Linux (Debian/Ubuntu):**
 
 ```bash
-sudo apt install libglfw3-dev libglm-dev
+sudo apt install libgl1-mesa-dev libglfw3-dev libglm-dev
 ```
 
 **Windows:**
 
-- Install via vcpkg: `vcpkg install glfw3 glm`
+The build needs MSVC >= 19.33 for C++23 `<print>`, and the dependencies come
+from vcpkg. Installing the packages is not enough on its own — `find_package`
+cannot see them until CMake is pointed at the vcpkg toolchain file.
+
+In a *Developer PowerShell* (so MSVC's environment is loaded):
+
+```powershell
+# 1. Get vcpkg and put it on the machine-wide path
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+C:\vcpkg\scripts\bootstrap-vcpkg.bat
+setx VCPKG_ROOT C:\vcpkg
+
+# 2. Install the dependencies, pinned to one triplet.
+#    vcpkg defaults to x86-windows, so the triplet is not optional here.
+C:\vcpkg\vcpkg install glfw3 glm --triplet=x64-windows
+
+# 3. Configure with the toolchain file so find_package(glfw3) resolves
+cmake -S . -B build -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake
+cmake --build build --config Release --parallel
+.\build\Release\linterra.exe
+```
+
+Notes:
+
+- The toolchain file lives at `%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake`,
+  which is the path vcpkg's own documentation uses. You can also set
+  `CMAKE_TOOLCHAIN_FILE` in a `CMakePresets.json` instead of passing it per
+  invocation.
+- `--triplet=x64-windows` (or `package:x64-windows` per package) matters: vcpkg
+  defaults to `x86-windows`, and a triplet mismatch is the usual cause of
+  `find_package(glfw3)` succeeding but the build failing to link.
+- Visual Studio's generator is multi-config, so the output lands in
+  `build\Release\` rather than `build\`, and `--config Release` is required —
+  `CMAKE_BUILD_TYPE` is ignored by multi-config generators.
+- **Windows is not currently built by CI.** There is no Windows job in
+  `.github/workflows/ci.yml`, so these instructions are unverified by an
+  automated check. Treat them as best-effort and open an issue if they are
+  wrong — adding the runner is tracked separately.
 
 Both the game and the test target configure and build with these commands. CI builds both, so a break in the game binary is caught on every push. See [CONTRIBUTING.md](CONTRIBUTING.md) for dev workflow details.
 
@@ -57,9 +95,14 @@ With CMake directly:
 ```bash
 git clone https://github.com/amodhakal/linterra.git
 cd linterra
+git submodule update --init --recursive   # only needed for the Metal backend
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ```
+
+The single submodule is `vendor/metal-cpp`, for the unimplemented Metal
+backend. It is not built or referenced today, so a plain clone is enough
+unless you are working on that backend.
 
 Or with `just` (see `justfile` for all recipes):
 
@@ -71,8 +114,13 @@ just dev      # debug build with sanitizers
 ### Run
 
 ```bash
-./build/linterra
+./build/linterra              # random world seed
+./build/linterra 12345        # fixed world seed, echoed at startup
 ```
+
+The optional argument is the world seed, an integer in `[0, 4294967295]`. It
+is echoed on startup, so it is the first thing to quote when reporting a
+terrain bug — the same seed reproduces the same world.
 
 ### Unit Tests
 
@@ -128,7 +176,7 @@ The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
 
 ## Roadmap
 
-Milestones 1–10 are shipped (see [Implemented Features](#implemented-features) below). M11–M19 are the planned sequence, and they are strictly ordered — each gates the next.
+Milestones 1–10 and M18 are shipped (see [Implemented Features](#implemented-features) below). M11–M17 and M19 are the planned sequence, and they are strictly ordered — each gates the next. M18 is independent of engine behaviour and was worked in parallel with M10.
 
 | Milestone | Title | Issues | Scope |
 | --- | --- | --- | --- |
@@ -140,7 +188,7 @@ Milestones 1–10 are shipped (see [Implemented Features](#implemented-features)
 | M15 | Streaming & Draw-Path Performance | 10 | Draw-call sorting, greedy meshing |
 | M16 | Rendering Quality: Lighting, Water & Terrain | 9 | AO, water, biome variety |
 | M17 | Gameplay: Interaction, Persistence & UI | 7 | Block editing, collision, HUD |
-| M18 | Documentation, Licensing & Code Hygiene | 9 | License, naming, dead code |
+| ~~M18~~ | Documentation, Licensing & Code Hygiene | — | Shipped: licence, contributor guide, README accuracy, dead code, lint config |
 | M19 | Spatial Partitioning & LOD | 1 | Sparse voxel octree |
 
 Full dependency graph and issue lists: [docs/roadmap.md](docs/roadmap.md).
@@ -148,6 +196,27 @@ Full dependency graph and issue lists: [docs/roadmap.md](docs/roadmap.md).
 ---
 
 ## Implemented Features
+
+### Milestone 18 — Documentation, Licensing & Code Hygiene
+
+This milestone changes no engine behaviour, which is what makes it independent: it was worked in parallel with Milestone 10 rather than after it. The theme is that a repository's claims about itself should be checkable, and that a linter is a better guarantee of a convention than a habit.
+
+**Licensing & Provenance**
+- Added an **MIT `LICENSE`** at the repository root. The repo had no stated terms, so there was no answer for a user or a contributor about what they were using or contributing into. MIT matches what the vendored dependencies already are.
+- Recorded **doctest provenance** in `vendor/doctest/PROVENANCE.md`: version, upstream release, path, copyright holder, licence, size, and SHA-256, plus how to verify the copy and how to upgrade it. Verifying this found that the upstream raw URL needs the `v` on the tag (`v2.4.11`, not `2.4.11`) — that is now recorded so the next person does not lose the same time. The vendored header is byte-for-byte identical to the upstream release.
+
+**Documentation Accuracy**
+- `CONTRIBUTING.md` went from 12 lines to a full contributor guide: per-platform prerequisites, building, submodules, both test executables with the headless-Linux caveat, how to add a test and the GL-free admission rule for `linterra_core`, shader validation, formatting and linting, what CI runs, and the licence.
+- **Ten factually wrong claims in this README were corrected**, each re-verified against the source rather than taken on trust: a documented `src/framebuffer.h` that does not exist, a `Framebuffer::resize` call that is really `IRenderer::resizeOffscreenTarget`, a missing `libgl1-mesa-dev` that makes configure fail on a clean Ubuntu, the entirely undocumented world-seed argument, a missing `git submodule update` step, an include-fixing note that pointed at a filename with the wrong case, and a "regression safety net" framing that overstated the suite.
+- The Windows build instructions were rewritten. `vcpkg install glfw3 glm` alone cannot work: without `-DCMAKE_TOOLCHAIN_FILE` the `find_package` calls fail, and vcpkg defaults to the `x86-windows` triplet. They also now state plainly that **Windows is not built by CI**, so they are unverified by an automated check.
+
+**Code Hygiene**
+- Removed three pieces of dead code: a commented-out `Camera::processScrollInput` describing a function that was never declared, an empty `Application::processScrollInput` wired to a GLFW callback that fired into a no-op on every scroll event, and `Constants::DO_TRIANGLE_LINE` — a `constexpr false` branched on inside `Chunk::pass()`, i.e. evaluated on every chunk upload to call `setPolygonMode` exactly never.
+- Removed the unused `TaskResult::pass()` forwarder; the one call site already reached through to the member it wrapped.
+
+**Tooling**
+- Committed **`.clang-tidy`**, which was absent. It declares the naming convention so it is enforced on new code rather than living in contributors' heads.
+- The naming rules were derived from the tree rather than from an external style, and the survey is worth recording: **75 of the 77** `m_`-prefixed members already used PascalCase, so the entire member-naming inconsistency was `m_firstFrame` and `m_lastFrame`. Functions, parameters, locals, classes, scoped enums, and constants were already consistent with no outliers. This is therefore a two-identifier rename, not the sweeping reformat the issue title implies — a repo-wide rename would have been a large, hard-to-review diff for no consistency gain.
 
 ### Milestone 10 — Build, CI & Safety Net
 
@@ -193,13 +262,13 @@ This milestone decoupled fog from the scene's fragment shader by moving it into 
 
 **Offscreen Render Target**
 
-- Added `Framebuffer` (`src/framebuffer.h` / `src/framebuffer.cpp`): owns an FBO with an RGBA color texture and a depth renderbuffer, resized on window changes. The scene's view-space distance is carried in the color alpha channel so the fog pass can reconstruct it without a depth-texture attachment.
+- Added an offscreen FBO inside the OpenGL backend (`OpenGLRenderer::resizeOffscreenTarget`, `src/renderer/opengl/opengl_renderer.cpp`, torn down by `destroyOffscreenTarget`): owns a framebuffer with an RGBA color texture and a depth renderbuffer, resized on window changes. The scene's view-space distance is carried in the color alpha channel so the fog pass can reconstruct it without a depth-texture attachment.
 
 **Two-Stage Render Pipeline**
 
 - Scene pass (`render.vert` / `render.frag`): samples the texture atlas, applies directional face lighting, and writes shaded color + view distance — no fog math.
 - Fog pass (`fog.vert` / `fog.frag`): a single attribute-less fullscreen triangle composites exponential fog over the offscreen scene using `uFogStart` / `uFogEnd` / `uFogColor`.
-- `Application::update()` now renders the world into the framebuffer, then binds it as a sampler for the fog shader onto the default framebuffer. Window resize forwards to `Framebuffer::resize`.
+- `Application::update()` now renders the world into the framebuffer, then binds it as a sampler for the fog shader onto the default framebuffer. Window resize forwards to `IRenderer::resizeOffscreenTarget`.
 
 **Shader Reorganization**
 
@@ -207,7 +276,7 @@ This milestone decoupled fog from the scene's fragment shader by moving it into 
 
 ### Milestone 7 — Unit Testing & CI
 
-This milestone added a regression safety net so math-heavy subsystems can be validated automatically on every push, rather than verified by eye.
+This milestone added a regression safety net so math-heavy subsystems can be validated automatically on every push, rather than verified by eye. It is a partial net, and the gaps are known — see the caveat below.
 
 **Test Framework**
 
@@ -225,7 +294,19 @@ This milestone added a regression safety net so math-heavy subsystems can be val
 
 - `config.h` now guards GLAD/GLFW behind a `LINTERRA_NO_OPENGL` macro so pure math compiles without GL headers.
 - Tests caught and fixed a real bug: `Camera::getRight()` computed `cross(m_Up, m_WorldUp)` (zero vector → NaN via `normalize`), silently corrupting frustum side-plane culling. Now uses `cross(m_Front, m_Up)`.
-- Fixed case-sensitive includes (`"frustum.h"` → `"Frustum.h"`) in `frustum.cpp`/`manager.cpp` that warned on macOS and would break the build on Linux/Windows.
+- Fixed case-sensitive includes in `frustum.cpp`/`manager.cpp` that did not match the actual filename, `src/frustum.h` (all lowercase). They warned on macOS and would have broken the build on Linux/Windows.
+
+> **Known gap, still open.** The frustum tests do not discriminate a correct
+> frustum from a broken one. All four culling cases are decided by the near,
+> far, or left plane, and none pins side-plane correctness — so the suite passes
+> against a frustum that is too wide, or one whose side planes have inverted,
+> just as cleanly as against a correct one. `Frustum::Frustum` is indeed still
+> computing `tan(m_Fov * 0.5)` with `m_Fov` in **degrees** while
+> `Camera::getProjection` correctly wraps it in `glm::radians`, so the culling
+> cone and the rendered cone disagree. It is tracked in **#127** (with the
+> regression test in **#66**, and the umbrella in **#4**), and is deliberately
+> not fixed in this milestone. Treat the frustum coverage as weaker than the
+> "safety net" framing above suggests.
 
 **Continuous Integration**
 
