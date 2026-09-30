@@ -258,6 +258,14 @@ int main() {
                  std::to_string(sentinel));
 
       // Same for mipmapping, which also takes a target.
+      //
+      // A mipmap-capable min filter has to be in place first. The parameters
+      // set above use GL_NEAREST, and glGenerateMipmap is
+      // GL_INVALID_OPERATION when TEXTURE_MIN_FILTER is a non-mipmap filter
+      // over a degenerate level range. macOS accepts the invalid call; Mesa
+      // does not, which is how CI found this.
+      renderer->setTextureParameter(*texture, GL_TEXTURE_MIN_FILTER,
+                                   GL_LINEAR_MIPMAP_LINEAR);
       renderer->generateMipmaps(*texture);
       ReportGlErrors((std::string("generateMipmaps: ") + label).c_str());
     }
