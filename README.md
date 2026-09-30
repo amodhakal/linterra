@@ -76,20 +76,37 @@ just dev      # debug build with sanitizers
 
 ### Unit Tests
 
-The pure (no-GL-context) subsystems — procedural noise, camera math, and
-frustum culling — have a doctest-based unit suite in `tests/`. The test
-executable is built alongside the game and requires only GLM (no OpenGL/GLFW
-runtime), so it can run in headless CI.
+There are two test executables, both built alongside the game and both run by
+`ctest`.
+
+**`linterra_tests`** is a doctest-based unit suite for the pure (no-GL-context)
+subsystems — procedural noise, camera math, frustum culling, `ThreadPool`,
+`PackedVertex` bit layout, `IO`, and `Player` mouse-look. It links
+`linterra_core`, the same static library the game links, so a test can never
+pass against a private copy of the code the game does not use. It needs only
+GLM at runtime, so it runs headless.
+
+**`linterra_smoke`** covers the GL path, which the unit suite cannot reach at
+all: it creates a *hidden* GLFW window — a real offscreen context with nothing
+on screen — and drives the actual engine classes through shader compilation,
+uniform resolution, buffer and VAO creation, chunk mesh upload, draw
+submission, the offscreen framebuffer, and teardown. It needs a windowing
+system, so on a headless Linux machine run it under `xvfb-run`.
 
 ```bash
 # configure + build everything (tests are ON by default)
 cmake -S . -B build
 cmake --build build
 
-# build + run the suite directly, or via ctest
+# build + run the unit suite directly, or via ctest
 cmake --build build --target linterra_tests
 ./build/linterra_tests
-ctest --test-dir build --output-on-failure
+
+# run both (add --output-on-failure for detail on a red run)
+ctest --test-dir build
+
+# headless Linux: the smoke test needs a display
+xvfb-run -a ctest --test-dir build
 ```
 
 Or simply:
@@ -98,10 +115,10 @@ Or simply:
 just test
 ```
 
-To omit the test target (e.g. when only building the game):
+To omit the test targets (e.g. when only building the game):
 
 ```bash
-cmake -S . -B build -DBUILD_TESTS=OFF
+cmake -S . -B build -DBUILD_TESTS=OFF -DBUILD_SMOKE_TEST=OFF
 ```
 
 The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
@@ -111,11 +128,11 @@ The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
 
 ## Roadmap
 
-Milestones 1–9 are shipped (see [Implemented Features](#implemented-features) below). M10–M19 are the planned sequence, and they are strictly ordered — each gates the next.
+Milestones 1–10 are shipped (see [Implemented Features](#implemented-features) below). M11–M19 are the planned sequence, and they are strictly ordered — each gates the next.
 
 | Milestone | Title | Issues | Scope |
 | --- | --- | --- | --- |
-| M10 | Build, CI & Safety Net | 11 | Headless smoke tests, game in CI |
+| ~~M10~~ | Build, CI & Safety Net | — | Shipped: headless smoke tests, game in CI, ASan/UBSan, shader validation, macOS runner |
 | M11 | Render Correctness: GPU Terrain & Culling | 10 | Fix culling, SSBO slots, winding |
 | M12 | Resource Lifetime, Shutdown & Error Reporting | 14 | Shutdown order, GL error attribution |
 | M13 | Threading, Chunk Pipeline & Player Physics | 11 | Physics query, race windows |
@@ -131,6 +148,31 @@ Full dependency graph and issue lists: [docs/roadmap.md](docs/roadmap.md).
 ---
 
 ## Implemented Features
+
+### Milestone 10 — Build, CI & Safety Net
+
+This milestone turned "it builds on my machine" into an automated safety net. Previously the doctest suite covered pure math with no GL context, so the entire GL path — shader loading, buffer and VAO creation, chunk upload, the offscreen framebuffer, resource teardown — shipped unverified, and a break in the game binary could not be caught by any check.
+
+**Build Correctness**
+- Enabled compiler warnings that were previously absent: `-Wall -Wextra -Wpedantic -Wshadow` (and `/W4` on MSVC) via a shared `linterra_warnings` INTERFACE target, so the game and the test target cannot drift apart. All three defects this surfaced are fixed: a `-Wreorder-ctor` in `Player`, a double→float narrowing, and an anonymous struct inside a union in `PackedVertex` (a GNU extension, now a named `Fields` member with the bit layout unchanged).
+- Raised the CMake floor from 3.16 to 3.20, since `CMAKE_CXX_STANDARD 23` is only understood from 3.20, and added an explicit toolchain gate (GCC ≥ 13, Clang ≥ 17, MSVC ≥ 19.33) so a missing `<print>` fails at configure time with a message naming the cause.
+- Removed the duplicated renderer source list. The recursive glob already covered `src/renderer/opengl/*.cpp`, and the `if(USE_OPENGL)` block re-declared the same paths — which also meant `-DUSE_OPENGL=OFF` never actually excluded anything. The option now warns instead of silently doing nothing.
+- `compile_commands.json` is emitted by default, so clangd, clang-tidy, and IDE tooling work with no extra flags.
+- Fixed the `justfile`: `just fmt` had been skipping every `.hpp` file — seven of them, including the whole renderer interface. The misleading `clippy` alias is replaced by a standalone `tidy` recipe plus a `tidy-build` fallback, and `fmt-check` was added.
+
+**CI Coverage**
+- The build now runs on **macOS as well as Ubuntu**. This is not redundant: the engine is developed and run on macOS, and it is the only platform that compiles the `__APPLE__` branches — the `USE_GPU` noise selection in `config.h`, the `_NSGetExecutablePath` path in `io.cpp`, and the forward-compat and 3.3-context hints in the OpenGL renderer.
+- **`linterra_smoke`**, a new headless executable that creates a *hidden* GLFW window — a real offscreen GL context with nothing on screen — and drives the actual engine classes through the sequence `Application` uses. It covers shader compilation and linking, uniform resolution, buffer and VAO creation, chunk mesh generation and GPU upload, draw submission, the offscreen framebuffer, and context teardown, asserting on observable state rather than pixels. 34 checks.
+- **Shader validation** with `glslangValidator`, in its own job. Shaders are compiled by the driver at runtime, so a syntax error previously surfaced only as a broken frame on a machine with a GL context.
+- **ASan + UBSan** over the suite, via a new `-DLINTERRA_SANITIZE` option. `just dev` had been able to do this locally but nothing ran it automatically. The option replaces a `CMAKE_CXX_FLAGS` string that never reached the C sources (`vendor/glad/src/glad.c`) or the link line reliably.
+
+**Test Coverage**
+- **`linterra_core`**, a static library of the GL-free engine sources (`camera`, `frustum`, `io`, `player`, `threadpool`) linked by both the game and the tests. Previously `linterra_tests` named `src/camera.cpp` and `src/frustum.cpp` directly, compiling a second copy — the suite was testing code the game did not use, and nothing would have caught the two drifting apart.
+- **Four more subsystems under test**: `ThreadPool` (task completion, genuine concurrency, and enforcement of the pending-task cap that stops one frame flooding the pool), `PackedVertex` (the 4-byte vertex format pinned bit for bit), `IO` (byte-exact reads, CRLF and lone-CR preservation, the executable-directory fallback), and `Player` (mouse-look, pitch clamping, view-vector normalisation). The suite grew from 14 test cases / 554 assertions to **40 / 675**.
+
+**Notes**
+- The smoke test runs on the Linux runner under `xvfb-run` with Mesa's software rasteriser. A GitHub macOS runner has no window server session, so no CGL context can be created there at all; the macOS job still compiles every Apple-specific branch and runs the unit suite.
+- `-Wconversion` is deliberately *not* enabled yet: it emits 250+ findings, nearly all mechanical narrowing in the GL upload paths. That cleanup is outstanding.
 
 ### Milestone 9 — GPU-Accelerated Terrain Generation & Platform-Adaptive Noise Fallback
 
@@ -177,7 +219,7 @@ This milestone added a regression safety net so math-heavy subsystems can be val
 - `Noise`: fbm determinism, bounded `[-1,1]` output, continuity, seed round-trip/isolation.
 - `Camera`: constructor placement, finite view/projection matrices, and a regression guard for the right-vector.
 - `Frustum`: near-chunk inclusion, far-plane culling, side-plane culling, determinism.
-- 13 test cases / 553 assertions, all passing.
+- 14 test cases / 554 assertions, all passing (as of Milestone 7; the suite has since grown — see Milestone 10).
 
 **Decoupling & Bug Fixes Surfaced**
 
@@ -187,7 +229,7 @@ This milestone added a regression safety net so math-heavy subsystems can be val
 
 **Continuous Integration**
 
-- Added `.github/workflows/ci.yml`: on every push and PR, Ubuntu + clang installs deps, configures with `BUILD_TESTS=ON`, builds `linterra_tests`, and runs `ctest --output-on-failure`.
+- Added `.github/workflows/ci.yml`: on every push and PR, Ubuntu + clang installs deps, configures with `BUILD_TESTS=ON`, builds the default target set, and runs `ctest --output-on-failure`. (Extended in Milestone 10 with a macOS runner, shader validation, and sanitizers.)
 - `ctest` exits non-zero on any failure, so a red test fails the job and blocks the merge on protected branches.
 
 ### Milestone 6 — Renderer Abstraction & Backend Portability

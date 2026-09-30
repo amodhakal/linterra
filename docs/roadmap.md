@@ -1,6 +1,6 @@
 # Roadmap
 
-Milestones 1 through 9 are shipped and documented in the [Implemented Features](../README.md#implemented-features) section of the README. What follows is the planned sequence: ten new milestones, M10 through M19, covering the 91 issues currently open in the tracker. Each milestone is labelled with the matching `M10`..`M19` GitHub label so you can filter the issue list to just that slice. The milestones are **strictly ordered** — every one of them gates at least one other, because each depends on correctness or stability guarantees established by the ones before it. Attempting M13 before M11, or M15 before M12, produces work that has to be thrown away.
+Milestones 1 through 10 are shipped and documented in the [Implemented Features](../README.md#implemented-features) section of the README. What follows is the planned sequence: M11 through M19. M10 was planned across 11 issues, of which #19 and #21 were already resolved on `main` when the milestone was picked up and were closed with evidence; the other nine shipped as a stack of pull requests. Each milestone is labelled with the matching `M10`..`M19` GitHub label so you can filter the issue list to just that slice. The milestones are **strictly ordered** — every one of them gates at least one other, because each depends on correctness or stability guarantees established by the ones before it. Attempting M13 before M11, or M15 before M12, produces work that has to be thrown away.
 
 ---
 
@@ -72,9 +72,13 @@ Milestones 1 through 9 are shipped and documented in the [Implemented Features](
 
 ## Milestones
 
-### M10 — Build, CI & Safety Net
+### M10 — Build, CI & Safety Net — SHIPPED
 
-This milestone will turn the project from "builds on my machine" into something with an automated safety net. Today the doctest suite covers pure math with no GL context, so the entire GL path — shader loading, framebuffer resize, chunk upload, resource teardown — ships unverified. This milestone adds a headless smoke-test executable that exercises that path without a window, promotes the game target into CI so a break in the binary blocks a merge, and turns on the compiler warnings and sanitizers that would have caught several of the bugs now filed under M11–M13.
+**Status: shipped.** See the Milestone 10 section of the [README](../README.md#implemented-features) for the full write-up. The planned scope was: turn the project from "builds on my machine" into something with an automated safety net. The doctest suite covered pure math with no GL context, so the entire GL path — shader loading, chunk upload, the offscreen framebuffer, resource teardown — shipped unverified. The milestone added a headless smoke-test executable that exercises that path without a visible window, brought the game target into CI, added a macOS runner, shader validation, and sanitizers, extracted a shared `linterra_core` library, and enabled the compiler warnings that would have caught several of the bugs now filed under M11–M13.
+
+Two planned items turned out to be already done and were closed with evidence rather than re-implemented: **#19** (the SDL3 dependency was removed by #24; `CMakeLists.txt` already requires and links GLFW) and **#21** (CI already built the full default target set). One deliberate omission: `-Wconversion` is not enabled yet, as it emits 250+ findings, nearly all mechanical narrowing in the GL upload paths.
+
+Historical scope as planned:
 
 **Build Correctness**
 - Fix the CMake dependency declaration so the build requires and links exactly the libraries actually used, and correct the declared minimum CMake version.
