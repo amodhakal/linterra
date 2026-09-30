@@ -196,6 +196,7 @@ if(BUILD_TESTS)
     tests/test_io.cpp
     tests/test_packed_vertex.cpp
     tests/test_player.cpp
+    tests/test_shader_uniforms.cpp
     tests/test_threadpool.cpp
     tests/test_texture.cpp
     vendor/noise/src/noise.cpp
@@ -227,6 +228,17 @@ if(BUILD_TESTS)
   if(LINTERRA_SANITIZE)
     target_link_libraries(linterra_tests PRIVATE linterra_sanitize)
   endif()
+
+  # test_shader_uniforms.cpp parses terrain.comp to check the C++ uniform list
+  # against the GLSL, so this target needs the shaders beside the executable
+  # the same way the game and the smoke test do.
+  add_custom_command(
+      TARGET linterra_tests POST_BUILD
+
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+      "$<TARGET_FILE_DIR:linterra_tests>/shaders"
+  )
 
   enable_testing()
   add_test(NAME linterra_tests COMMAND linterra_tests)

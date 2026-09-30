@@ -197,6 +197,44 @@ int main() {
       fog.newUniform("uFogColor");
     }
 
+    // --- Terrain compute shader --------------------------------------------
+    // Every uniform in Constants::TERRAIN_COMPUTE_UNIFORMS must resolve to a
+    // real location in the linked compute program. tests/test_shader_uniforms.cpp
+    // checks the same list against the GLSL source without needing a context;
+    // this is the half that can only be checked by the driver, and it is what
+    // would have caught #125 (uSlot unregistered -> every chunk writes SSBO
+    // slot 0, with glGetError() clean throughout because no illegal call is
+    // made).
+    //
+    // Compute shaders need GL 4.3. macOS caps out at 4.1, so this block is
+    // skipped there and the static check is the only coverage on that platform.
+    // A skip is reported, never silently passed.
+    {
+      GLint major = 0;
+      GLint minor = 0;
+      glGetIntegerv(GL_MAJOR_VERSION, &major);
+      glGetIntegerv(GL_MINOR_VERSION, &minor);
+      if (major < 4 || (major == 4 && minor < 3)) {
+        std::printf("  skip  terrain compute uniforms: needs GL 4.3, context "
+                    "is %d.%d\n",
+                    major, minor);
+      } else {
+        Shader compute(renderer.get());
+        compute.loadCompute(Constants::TERRAIN_COMPUTE_PATH);
+        Report("terrain compute shader compiles and links", true);
+        for (const char *name : Constants::TERRAIN_COMPUTE_UNIFORMS) {
+          compute.newUniform(name);
+          // Read the location back rather than trusting glGetError: a dropped
+          // write is a silent no-op, not a GL error, so asserting on the error
+          // state alone would pass either way.
+          Report(std::string("compute uniform resolves: ") + name,
+                 compute.hasUniform(name) && compute.uniformLocation(name) >= 0,
+                 "location = " + std::to_string(compute.uniformLocation(name)));
+        }
+      }
+    }
+    ReportGlErrors("shader stage is error-free");
+
     // --- Chunk generation and GPU upload ----------------------------------
     // generateMeshData + generateMesh is the CPU half of the pipeline; pass()
     // is the hand-off that creates the VBO/EBO/VAO and uploads. This is the

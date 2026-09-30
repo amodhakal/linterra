@@ -42,14 +42,12 @@ void ChunkManager::load() {
   if (Constants::Noise::USE_GPU) {
     try {
       m_ComputeShader.loadCompute(Constants::TERRAIN_COMPUTE_PATH);
-      m_ComputeShader.newUniform("uChunkPos");
-      m_ComputeShader.newUniform("uFrequency");
-      m_ComputeShader.newUniform("uMaxHeight");
-      m_ComputeShader.newUniform("uExtSide");
-      m_ComputeShader.newUniform("uSeed");
-      m_ComputeShader.newUniform("uOctaves");
-      m_ComputeShader.newUniform("uGain");
-      m_ComputeShader.newUniform("uLacunarity");
+      // Register exactly the uniforms terrain.comp declares. The list lives in
+      // config.h so the test suite can check it against the GLSL source;
+      // registering by hand is what let uSlot go missing.
+      for (const char *uniform : Constants::TERRAIN_COMPUTE_UNIFORMS) {
+        m_ComputeShader.newUniform(uniform);
+      }
 
       size_t kExtSide = Chunk::kExtSide;
       // One slot per in-flight chunk so multiple compute dispatches can be

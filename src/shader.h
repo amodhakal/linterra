@@ -29,6 +29,8 @@ class Shader {
   [[nodiscard]] std::uint32_t getId() const;
 
   void newUniform(const char* name);
+  [[nodiscard]] bool hasUniform(const char* name) const;
+  [[nodiscard]] int uniformLocation(const char* name) const;
   void setUniformMat4(const char* name, const glm::mat4& values);
   void setUniformInt(const char* name, int value);
   void setUniformIntArray(const char* name, const int* values, int count);
