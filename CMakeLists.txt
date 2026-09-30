@@ -7,6 +7,20 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Emit compile_commands.json by default so clangd, clang-tidy, and IDE
+# tooling work out of the box. Only meaningful for single-config generators
+# (Makefiles, Ninja); Xcode and the Visual Studio generators produce a
+# .vcxproj instead.
+#
+# This is set as a normal variable rather than via option() because
+# CMAKE_EXPORT_COMPILE_COMMANDS is a CMAKE_-prefixed name: the generator
+# pre-creates a (blank) cache entry for it, which makes option() a no-op.
+# The blank check defaults it to ON while still letting an explicit
+# -DCMAKE_EXPORT_COMPILE_COMMANDS=OFF win.
+if(CMAKE_EXPORT_COMPILE_COMMANDS STREQUAL "")
+  set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+endif()
+
 # The engine uses C++23 <print>, which is not available on the older toolchains
 # CMake would otherwise happily accept. Fail at configure time with a message
 # that names the actual cause rather than letting <print> surface later as a
