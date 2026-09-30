@@ -15,7 +15,7 @@ Camera::Camera(glm::vec3 position) {
   m_Far = Constants::Camera::FAR;
 
   m_Fov = Constants::Camera::DEFAULT_FOV;
-  m_Aspect = (float)Constants::SCR_WIDTH / (float)Constants::SCR_HEIGHT;
+  setAspect(Constants::SCR_WIDTH, Constants::SCR_HEIGHT);
 
   m_Yaw = Constants::Camera::DEFAULT_YAW;
   m_Pitch = Constants::Camera::DEFAULT_PITCH;
@@ -28,6 +28,18 @@ Camera::Camera(glm::vec3 position) {
 
 glm::mat4 Camera::getView() {
   return glm::lookAt(m_Position, m_Position + m_Front, m_Up);
+}
+
+void Camera::setAspect(std::uint32_t framebufferWidth,
+                       std::uint32_t framebufferHeight) {
+  // A minimised window reports a zero dimension. Keep the previous value
+  // rather than producing an infinite or NaN aspect, which would poison both
+  // the projection and the frustum's side planes.
+  if (framebufferHeight == 0) {
+    return;
+  }
+  m_Aspect = static_cast<float>(framebufferWidth) /
+             static_cast<float>(framebufferHeight);
 }
 
 glm::mat4 Camera::getProjection() {
