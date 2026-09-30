@@ -106,6 +106,7 @@ set(LINTERRA_CORE_SOURCES
   src/camera.cpp
   src/frustum.cpp
   src/io.cpp
+  src/player.cpp
   src/threadpool.cpp
 )
 
@@ -136,7 +137,7 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp" "vendor/glad/src/glad.c"
 # would give the game duplicate symbol definitions at link time. GLOB_RECURSE
 # yields absolute paths even for a relative pattern, so this filters on the
 # path rather than removing the relative names from the list.
-list(FILTER SOURCES EXCLUDE REGEX "src/(camera|frustum|io|threadpool)\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX "src/(camera|frustum|io|player|threadpool)\\.cpp$")
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
@@ -191,6 +192,10 @@ if(BUILD_TESTS)
     tests/test_noise.cpp
     tests/test_camera.cpp
     tests/test_frustum.cpp
+    tests/test_io.cpp
+    tests/test_packed_vertex.cpp
+    tests/test_player.cpp
+    tests/test_threadpool.cpp
     vendor/noise/src/noise.cpp
   )
 

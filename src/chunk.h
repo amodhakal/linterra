@@ -6,8 +6,6 @@
 
 #include <glm/glm.hpp>
 
-#include <glad/glad.h>
-
 #include "config.h"
 
 class IRenderer;
