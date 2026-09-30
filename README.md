@@ -176,7 +176,7 @@ The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
 
 ## Roadmap
 
-Milestones 1–10 are shipped (see [Implemented Features](#implemented-features) below). M11–M19 are the planned sequence, and they are strictly ordered — each gates the next.
+Milestones 1–10 and M18 are shipped (see [Implemented Features](#implemented-features) below). M11–M17 and M19 are the planned sequence, and they are strictly ordered — each gates the next. M18 is independent of engine behaviour and was worked in parallel with M10.
 
 | Milestone | Title | Issues | Scope |
 | --- | --- | --- | --- |
@@ -188,7 +188,7 @@ Milestones 1–10 are shipped (see [Implemented Features](#implemented-features)
 | M15 | Streaming & Draw-Path Performance | 10 | Draw-call sorting, greedy meshing |
 | M16 | Rendering Quality: Lighting, Water & Terrain | 9 | AO, water, biome variety |
 | M17 | Gameplay: Interaction, Persistence & UI | 7 | Block editing, collision, HUD |
-| M18 | Documentation, Licensing & Code Hygiene | 9 | License, naming, dead code |
+| ~~M18~~ | Documentation, Licensing & Code Hygiene | — | Shipped: licence, contributor guide, README accuracy, dead code, lint config |
 | M19 | Spatial Partitioning & LOD | 1 | Sparse voxel octree |
 
 Full dependency graph and issue lists: [docs/roadmap.md](docs/roadmap.md).
@@ -196,6 +196,27 @@ Full dependency graph and issue lists: [docs/roadmap.md](docs/roadmap.md).
 ---
 
 ## Implemented Features
+
+### Milestone 18 — Documentation, Licensing & Code Hygiene
+
+This milestone changes no engine behaviour, which is what makes it independent: it was worked in parallel with Milestone 10 rather than after it. The theme is that a repository's claims about itself should be checkable, and that a linter is a better guarantee of a convention than a habit.
+
+**Licensing & Provenance**
+- Added an **MIT `LICENSE`** at the repository root. The repo had no stated terms, so there was no answer for a user or a contributor about what they were using or contributing into. MIT matches what the vendored dependencies already are.
+- Recorded **doctest provenance** in `vendor/doctest/PROVENANCE.md`: version, upstream release, path, copyright holder, licence, size, and SHA-256, plus how to verify the copy and how to upgrade it. Verifying this found that the upstream raw URL needs the `v` on the tag (`v2.4.11`, not `2.4.11`) — that is now recorded so the next person does not lose the same time. The vendored header is byte-for-byte identical to the upstream release.
+
+**Documentation Accuracy**
+- `CONTRIBUTING.md` went from 12 lines to a full contributor guide: per-platform prerequisites, building, submodules, both test executables with the headless-Linux caveat, how to add a test and the GL-free admission rule for `linterra_core`, shader validation, formatting and linting, what CI runs, and the licence.
+- **Ten factually wrong claims in this README were corrected**, each re-verified against the source rather than taken on trust: a documented `src/framebuffer.h` that does not exist, a `Framebuffer::resize` call that is really `IRenderer::resizeOffscreenTarget`, a missing `libgl1-mesa-dev` that makes configure fail on a clean Ubuntu, the entirely undocumented world-seed argument, a missing `git submodule update` step, an include-fixing note that pointed at a filename with the wrong case, and a "regression safety net" framing that overstated the suite.
+- The Windows build instructions were rewritten. `vcpkg install glfw3 glm` alone cannot work: without `-DCMAKE_TOOLCHAIN_FILE` the `find_package` calls fail, and vcpkg defaults to the `x86-windows` triplet. They also now state plainly that **Windows is not built by CI**, so they are unverified by an automated check.
+
+**Code Hygiene**
+- Removed three pieces of dead code: a commented-out `Camera::processScrollInput` describing a function that was never declared, an empty `Application::processScrollInput` wired to a GLFW callback that fired into a no-op on every scroll event, and `Constants::DO_TRIANGLE_LINE` — a `constexpr false` branched on inside `Chunk::pass()`, i.e. evaluated on every chunk upload to call `setPolygonMode` exactly never.
+- Removed the unused `TaskResult::pass()` forwarder; the one call site already reached through to the member it wrapped.
+
+**Tooling**
+- Committed **`.clang-tidy`**, which was absent. It declares the naming convention so it is enforced on new code rather than living in contributors' heads.
+- The naming rules were derived from the tree rather than from an external style, and the survey is worth recording: **75 of the 77** `m_`-prefixed members already used PascalCase, so the entire member-naming inconsistency was `m_firstFrame` and `m_lastFrame`. Functions, parameters, locals, classes, scoped enums, and constants were already consistent with no outliers. This is therefore a two-identifier rename, not the sweeping reformat the issue title implies — a repo-wide rename would have been a large, hard-to-review diff for no consistency gain.
 
 ### Milestone 10 — Build, CI & Safety Net
 

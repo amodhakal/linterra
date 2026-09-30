@@ -247,9 +247,20 @@ This milestone turns the engine into something you can actually play with. It de
 
 Issues: #77, #78, #84, #85, #86, #90, #91
 
-### M18 — Documentation, Licensing & Code Hygiene
+### M18 — Documentation, Licensing & Code Hygiene — SHIPPED
 
-This milestone is independent of every other one and can be worked at any point, including alongside M10. None of it changes engine behaviour, which means it carries no dependency risk and can absorb spare capacity without blocking anyone. It does, however, change files broadly, so the mechanical removals are worth batching separately from behavioral edits.
+**Status: shipped.** See the Milestone 18 section of the [README](../README.md#implemented-features) for the full write-up.
+
+As planned, this milestone changed no engine behaviour and was therefore worked **in parallel with M10** rather than after it — the two touched disjoint files, which is what made the parallelism safe rather than merely possible. M10 owned `CMakeLists.txt`, `ci.yml`, the `justfile`, `tests/`, and the README build sections; M18's documentation items were ordered first precisely so the two streams would not collide, with the source-level hygiene items (#61, #56) last.
+
+One planned item turned out to be already done and was closed with evidence: **#75**, the doubled slash in the README screenshot path, was corrected in commit `6408afe`.
+
+Two findings worth recording, because both contradicted the milestone's own premise:
+
+  - **#56's naming inconsistency was two identifiers.** 75 of the 77 `m_`-prefixed members already used PascalCase; the outliers were `m_firstFrame` and `m_lastFrame`. Functions, parameters, locals, classes, and constants were already consistent. The change is a two-identifier rename plus a `.clang-tidy` that declares the convention — not the repo-wide reformat the issue title implies.
+  - **#76's premise was partly stale.** The Windows instructions were not referencing SDL3 (that was removed in M9); they were simply missing the vcpkg toolchain file and the triplet, which is why they could not have worked.
+
+Historical scope as planned:
 
 **Documentation & Licensing**
 - Add a LICENSE file at the repo root.
