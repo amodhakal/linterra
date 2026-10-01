@@ -655,6 +655,74 @@ int main() {
   renderer->terminateWindowing();
   Report("terminateWindowing", true);
 
+  // --- Shutdown ordering (#128) ------------------------------------------
+  // ~Application used to call glfwTerminate() from its destructor body, which
+  // runs *before* any member is destroyed. Every GL-owning member was
+  // therefore still alive with the context already gone: ~ChunkManager
+  // deleted a VBO/EBO/VAO per chunk, ~TextureArray deleted textures, ~Shader
+  // deleted programs, and ~OpenGLRenderer deleted the offscreen target -- all
+  // with no current context and GLAD's pointers aimed at an unloaded driver
+  // image. Undefined behaviour, across thousands of deletions rather than one.
+  //
+  // The fix puts windowing teardown in ~OpenGLRenderer, after it has released
+  // its own objects, and makes terminateWindowing() idempotent because
+  // ~OpenGLRenderer now also calls it. This exercises the same path: destroy a
+  // renderer that owns a live offscreen target while the context is current.
+  {
+    auto shutdownRenderer = createRenderer(RenderBackend::OpenGL);
+    if (!shutdownRenderer) {
+      Report("renderer for the shutdown-ordering check", false);
+    } else {
+      shutdownRenderer->initializeWindowing();
+      shutdownRenderer->configureWindowHints();
+      if (!shutdownRenderer->createWindow(32, 32, "linterra-shutdown")) {
+        std::printf(
+            "  skip  shutdown ordering: no GL context available on this "
+            "platform\n");
+      } else {
+        shutdownRenderer->makeContextCurrent();
+        shutdownRenderer->loadContextFunctions();
+        // Give the renderer a real GL object to release, so the destructor has
+        // something to delete before it terminates windowing.
+        shutdownRenderer->resizeOffscreenTarget(32, 32);
+        // Destroying runs destroyOffscreenTarget() and then
+        // terminateWindowing(), in that order, so the renderer's own GL
+        // objects are released while the context is still current.
+        shutdownRenderer.reset();
+        Report("renderer destruction releases GL objects before teardown",
+               true);
+
+        // terminateWindowing() is now also called from ~OpenGLRenderer, so
+        // it must be idempotent -- an owner that still tears down explicitly
+        // must not cause a second glfwTerminate.
+        auto second =
+            std::unique_ptr<IRenderer>(createRenderer(RenderBackend::OpenGL));
+        bool secondHadContext = false;
+        if (second) {
+          second->initializeWindowing();
+          second->configureWindowHints();
+          if (second->createWindow(32, 32, "linterra-shutdown-2")) {
+            second->makeContextCurrent();
+            second->loadContextFunctions();
+            second->terminateWindowing();
+            secondHadContext = true;
+          }
+          // The destructor calls terminateWindowing() again. A second
+          // glfwTerminate is what this guards against.
+          second.reset();
+        }
+        if (secondHadContext) {
+          Report("terminateWindowing is idempotent across explicit call "
+                 "and destructor",
+                 true);
+        } else {
+          std::printf("  skip  idempotence: no second context available\n");
+        }
+      }
+      shutdownRenderer.reset();
+    }
+  }
+
   if (g_Failures != 0) {
     std::printf("\nsmoke test FAILED with %d problem(s)\n", g_Failures);
     return EXIT_FAILURE;

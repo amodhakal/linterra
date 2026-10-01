@@ -105,6 +105,8 @@ class OpenGLRenderer : public IRenderer {
   // A callback registered before GLAD was loaded, armed once it is (#129).
   FramebufferSizeCallback m_PendingFramebufferSizeCallback = nullptr;
   bool m_ContextFunctionsLoaded = false;
+  // terminateWindowing() is called both explicitly and from ~OpenGLRenderer.
+  bool m_WindowingTerminated = false;
 
   std::uint32_t m_OffscreenFbo = 0;
   std::uint32_t m_OffscreenColorTexture = 0;

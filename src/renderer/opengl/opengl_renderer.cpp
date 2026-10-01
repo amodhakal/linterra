@@ -14,7 +14,27 @@
 
 OpenGLRenderer::OpenGLRenderer() = default;
 
-OpenGLRenderer::~OpenGLRenderer() { destroyOffscreenTarget(); }
+OpenGLRenderer::~OpenGLRenderer() {
+  // Two rules, and both orderings matter:
+
+  // 1. Release every GL object this renderer owns *before* terminating
+  //    windowing. ~Application used to call glfwTerminate() from its
+  //    destructor body, which runs before any member is destroyed -- so
+  //    destroyOffscreenTarget() here, ~ChunkManager's per-chunk
+  //    glDeleteBuffers/glDeleteVertexArrays, ~TextureArray's
+  //    glDeleteTextures and ~Shader's glDeleteProgram all ran with no
+  //    current context and GLAD's pointers aimed at an unloaded driver
+  //    image. Undefined behaviour: GL_INVALID_OPERATION spam at best, a hard
+  //    abort inside the driver on Mesa and on strict contexts, across
+  //    thousands of deletions rather than one (#128).
+  destroyOffscreenTarget();
+
+  // 2. Tear down windowing here rather than leaving it to a caller. A
+  //    renderer that owns GL objects owns the context they live in; letting
+  //    the owner decide when to destroy the context is what made the ordering
+  //    possible to get wrong in the first place.
+  terminateWindowing();
+}
 
 void OpenGLRenderer::clear(const glm::vec4& clearColor) {
   glClearColor(clearColor.r, clearColor.g, clearColor.b, clearColor.a);
@@ -210,6 +230,12 @@ void OpenGLRenderer::initializeWindowing() {
 }
 
 void OpenGLRenderer::terminateWindowing() {
+  // Idempotent. ~OpenGLRenderer calls this too, so an explicit call from the
+  // owner (or a second one) must not run glfwTerminate twice.
+  if (m_WindowingTerminated) {
+    return;
+  }
+  m_WindowingTerminated = true;
   glfwTerminate();
 }
 

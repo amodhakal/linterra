@@ -121,10 +121,12 @@ Application::Application(const char* title, const std::uint32_t width, const std
 }
 
 Application::~Application() {
+  // Only the ImGui teardown belongs here. Windowing is torn down by
+  // ~OpenGLRenderer, which runs after this body and after every member below
+  // has been destroyed -- so the context outlives every GL object (#128).
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
-  m_Renderer->terminateWindowing();
 }
 
 bool Application::isRunning() {
