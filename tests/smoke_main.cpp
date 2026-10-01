@@ -33,7 +33,9 @@
 #include "renderer/opengl/gl_texture_type.hpp"
 #include "renderer/opengl/opengl_shader.hpp"
 #include "renderer/renderer.hpp"
+#include "filesystem"
 #include "shader.h"
+#include "texture.h"
 
 namespace {
 
@@ -745,6 +747,53 @@ int main() {
       Report("bindOffscreenColorTexture (as sampler2D)", true);
     }
     ReportGlErrors("offscreen color texture binding");
+
+    // --- Textures resolve like shaders do (#146) -------------------------
+    // stbi_load opens with a plain fopen, so a relative path resolves against
+    // the working directory with no fallback -- while the shader path went
+    // through IO::resolvePath, which also tries the executable's directory.
+    // Two subsystems reading the same resources/ tree by two different rules
+    // meant the engine found its shaders and then failed on its textures the
+    // moment it was launched from anywhere but the repo root: a .app bundle,
+    // a CI job invoking the binary by absolute path, any IDE run
+    // configuration, or a wrapper script that sets a working directory.
+    //
+    // This block moves the working directory somewhere unrelated before
+    // loading, so the relative path cannot resolve against the cwd and only
+    // the executable-directory fallback can satisfy it. Pre-fix this threw and
+    // the smoke test exited non-zero.
+    {
+      const std::filesystem::path originalCwd =
+          std::filesystem::current_path();
+      const std::filesystem::path elsewhere =
+          std::filesystem::temp_directory_path() / "linterra_texture_cwd";
+      std::error_code ignored;
+      std::filesystem::create_directories(elsewhere, ignored);
+      std::filesystem::current_path(elsewhere);
+
+      // Guard the premise: the relative path must NOT resolve from here, or
+      // this would pass without exercising the fallback. Report rather than
+      // REQUIRE, since the smoke test has no doctest macros.
+      const bool resolvableFromCwd = std::filesystem::exists(
+          std::filesystem::path(Constants::GRASS_TOP_TEXTURE_PATH));
+      Report("the texture path does not resolve from the working directory",
+             !resolvableFromCwd,
+             "the premise of this check is that it must not");
+
+      Texture texture(renderer.get());
+      bool loaded = true;
+      std::string detail;
+      try {
+        texture.loadFromFiles({Constants::GRASS_TOP_TEXTURE_PATH});
+      } catch (const std::exception &e) {
+        loaded = false;
+        detail = e.what();
+      }
+      std::filesystem::current_path(originalCwd);
+
+      Report("a texture loads with an unrelated working directory", loaded,
+             detail);
+    }
 
     renderer->swapBuffers();
     Report("swapBuffers", true);

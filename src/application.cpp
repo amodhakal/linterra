@@ -64,8 +64,8 @@ Application::Application(const char* title, const std::uint32_t width, const std
 
   try {
     m_TextureArray.loadFromFiles(
-        {"resources/blocks/grass_top.png", "resources/blocks/dirt.png",
-         "resources/water.jpg"});
+        {Constants::GRASS_TOP_TEXTURE_PATH, Constants::DIRT_TEXTURE_PATH,
+         Constants::WATER_TEXTURE_PATH});
   } catch (const std::exception& e) {
     throw std::runtime_error(std::string("Failed to load textures: ") +
                             e.what());
