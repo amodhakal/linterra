@@ -795,6 +795,46 @@ int main() {
              detail);
     }
 
+    // --- GL debug output must not assume the entry points exist (#148) ---
+    // Turning on GL_DEBUG_OUTPUT calls glDebugMessageCallback and
+    // glDebugMessageControl. GLAD resolves those as function pointers, and a
+    // context that does not expose them leaves them null -- calling one is a
+    // jump to address 0. This is reached from loadContextFunctions, i.e.
+    // during Application's constructor, so an unguarded call would crash at
+    // startup on every such platform rather than failing anywhere useful.
+    //
+    // Apple's OpenGL does not expose them at all, which is why this runs on
+    // the development platform and not just on Linux CI: glad_glDebugMessage-
+    // Callback is null here, verified by reading the pointer.
+    // The invariant: if the entry point exists, debug output was turned on;
+    // if it does not, it was not -- and either way nothing crashed, which is
+    // the part that has to hold on every platform.
+    //
+    // Both arms are real assertions. On a platform without the entry point the
+    // second arm is the one doing the work, and reaching it at all means the
+    // guarded path in loadContextFunctions was taken rather than the call
+    // being made through a null pointer.
+    GLboolean debugOutput = GL_FALSE;
+    glGetBooleanv(GL_DEBUG_OUTPUT, &debugOutput);
+    const bool haveEntryPoint = glad_glDebugMessageCallback != nullptr;
+    Report(
+        "GL debug output is enabled iff its entry point is available",
+        haveEntryPoint == (debugOutput == GL_TRUE),
+        std::string("glDebugMessageCallback ") +
+            (haveEntryPoint ? "present" : "null") + ", GL_DEBUG_OUTPUT=" +
+            std::to_string(static_cast<int>(debugOutput)));
+
+    // Drain first: glGetBooleanv(GL_DEBUG_OUTPUT) itself raises
+    // GL_INVALID_ENUM on a context without the debug extension, and leaving
+    // that pending would make the very next check fail for the wrong reason.
+    while (glGetError() != GL_NO_ERROR) {
+    }
+
+    // Whichever way it went, the context must be usable afterwards.
+    renderer->bindOffscreenTarget();
+    renderer->clear(glm::vec4(0.1f, 0.2f, 0.3f, 1.0f));
+    ReportGlErrors("the context is usable after GL debug setup");
+
     renderer->swapBuffers();
     Report("swapBuffers", true);
 
