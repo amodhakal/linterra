@@ -805,6 +805,82 @@ int main() {
     return EXIT_FAILURE;
   }
 
+    // --- A 0x0 drawing buffer must not fall back to the default target (#147)
+    // A minimized window reports a 0x0 drawing buffer, and
+    // resizeOffscreenTarget refuses to allocate a 0x0 framebuffer attachment
+    // (that is itself a GL_INVALID_VALUE). With no target allocated, the old
+    // code silently degraded to the default objects: bindOffscreenTarget
+    // bound framebuffer 0 -- the window's back buffer -- so the scene pass
+    // drew to the swap chain, the fog pass cleared that same buffer and wiped
+    // the scene, and sampling the colour texture afterwards was a
+    // framebuffer/texture feedback loop at GL_INVALID_OPERATION every frame.
+    //
+    // bindOffscreenTarget and bindOffscreenColorTexture now refuse and report
+    // rather than binding 0, so this is checkable: the framebuffer must still
+    // be the default one afterwards, which is what makes the loop.
+    {
+      auto renderless = createRenderer(RenderBackend::OpenGL);
+      Report("renderer for the no-target check",
+             renderless != nullptr);
+      if (renderless) {
+        renderless->initializeWindowing();
+        renderless->configureWindowHints();
+        if (!renderless->createWindow(32, 32, "linterra-renderless")) {
+          std::printf("  skip  no-target check: no GL context\n");
+        } else {
+          renderless->makeContextCurrent();
+          renderless->loadContextFunctions();
+
+          // 0x0 is refused -- the same contract a minimized window hits.
+          Report("a 0x0 drawing buffer is refused",
+                 !renderless->resizeOffscreenTarget(0, 0));
+
+          // Nothing was allocated, so binding must not fall through to the
+          // default framebuffer. Read the binding state back rather than
+          // asserting on glGetError: binding 0 is entirely legal, which is
+          // exactly why the bug was quiet.
+          //
+          // A fresh context already has the default framebuffer bound, so
+          // something non-zero has to be bound first for the two behaviours to
+          // be distinguishable. Pre-#147 bindOffscreenTarget unconditionally
+          // ran glBindFramebuffer(GL_FRAMEBUFFER, m_OffscreenFbo) with the
+          // name still 0 -- the window's back buffer -- so the scene pass drew
+          // to the swap chain, the fog pass cleared that same buffer and wiped
+          // the scene, and sampling the colour texture afterwards was a
+          // framebuffer/texture feedback loop.
+          // A real, generated framebuffer -- binding an arbitrary name like
+          // 7 is rejected by GL, which would make GL_FRAMEBUFFER_BINDING
+          // report 0 regardless of what bindOffscreenTarget does.
+          GLint bound = 0;
+          GLuint probeFbo = 0;
+          glGenFramebuffers(1, &probeFbo);
+          glBindFramebuffer(GL_FRAMEBUFFER, probeFbo);
+          renderless->bindOffscreenTarget();
+          glGetIntegerv(GL_FRAMEBUFFER_BINDING, &bound);
+          Report("binding with no target does not fall back to the default "
+                 "framebuffer",
+                 bound == static_cast<GLint>(probeFbo),
+                 "GL_FRAMEBUFFER_BINDING = " + std::to_string(bound) +
+                     " (0 means it fell back to the default framebuffer, "
+                     "which is the bug)");
+          glDeleteFramebuffers(1, &probeFbo);
+
+          // And a valid size still works, so the refusal is specific to the
+          // unallocated case rather than breaking the normal path.
+          Report("a valid size still allocates after a refusal",
+                 renderless->resizeOffscreenTarget(32, 32));
+          renderless->bindOffscreenTarget();
+          glGetIntegerv(GL_FRAMEBUFFER_BINDING, &bound);
+          Report("a real target binds after allocation", bound != 0,
+                 "GL_FRAMEBUFFER_BINDING = " + std::to_string(bound));
+          ReportGlErrors("no-target and recovery checks left the context "
+                         "error-free");
+        }
+        renderless.reset();
+      }
+    }
+
+
   renderer->terminateWindowing();
   Report("terminateWindowing", true);
 

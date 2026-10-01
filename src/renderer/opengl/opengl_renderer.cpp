@@ -487,10 +487,36 @@ bool OpenGLRenderer::resizeOffscreenTarget(std::uint32_t width,
 }
 
 void OpenGLRenderer::bindOffscreenTarget() {
+  if (m_OffscreenFbo == 0) {
+    // Binding 0 here means the window's back buffer. The scene pass then
+    // draws straight to the swap chain instead of the offscreen colour
+    // target, the fog pass clears that same back buffer and wipes the scene
+    // just drawn, and sampling the offscreen colour texture afterwards is a
+    // framebuffer/texture feedback loop -- GL_INVALID_OPERATION, every frame,
+    // reported by the generic drain with no indication which call caused it.
+    //
+    // Refusing and reporting makes this a loud, local failure rather than a
+    // quiet wrong render. Callers that legitimately have no target -- a
+    // minimized window, whose drawing buffer is 0x0 -- should skip the frame
+    // instead, which is what Application::update now does (#147).
+    std::fprintf(stderr,
+                 "bindOffscreenTarget: no offscreen framebuffer is "
+                 "allocated; refusing to bind the default framebuffer\n");
+    return;
+  }
   glBindFramebuffer(GL_FRAMEBUFFER, m_OffscreenFbo);
 }
 
 void OpenGLRenderer::bindOffscreenColorTexture(std::int32_t unit) {
+  if (m_OffscreenColorTexture == 0) {
+    // Same reasoning as bindOffscreenTarget. Texture 0 is the default
+    // texture, so binding it and sampling it while its would-be attachment is
+    // bound is precisely the feedback loop described there.
+    std::fprintf(stderr,
+                 "bindOffscreenColorTexture: no offscreen colour texture is "
+                 "allocated; refusing to bind the default texture\n");
+    return;
+  }
   bindTexture2D(m_OffscreenColorTexture, unit);
 }
 

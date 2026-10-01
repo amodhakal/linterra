@@ -104,7 +104,14 @@ Application::Application(const char* title, const std::uint32_t width, const std
   m_Renderer->getFramebufferSize(&fbWidth, &fbHeight);
   m_FrameWidth = static_cast<std::uint32_t>(fbWidth);
   m_FrameHeight = static_cast<std::uint32_t>(fbHeight);
-  m_Renderer->resizeOffscreenTarget(m_FrameWidth, m_FrameHeight);
+  // Guarded: if the process starts with a 0x0 drawable -- headless, or a
+  // window minimized before the first frame -- there is nothing to allocate,
+  // and without this the engine would hold no valid render target for its
+  // entire lifetime, because the only re-allocation trigger is a resize
+  // callback that may never fire with a non-zero size (#147).
+  if (m_FrameWidth > 0 && m_FrameHeight > 0) {
+    m_Renderer->resizeOffscreenTarget(m_FrameWidth, m_FrameHeight);
+  }
 
   // Only now is the resize callback safe to arm. Both preconditions hold:
   // GLAD has resolved the entry points, so handleResizeCallback no longer
@@ -134,6 +141,31 @@ bool Application::isRunning() {
 }
 
 void Application::update() {
+  // A minimized window reports a 0x0 drawing buffer -- on macOS that is what
+  // GLFW delivers, and it fires the resize callback with 0, 0.
+  //
+  // There is no valid render target at that size: resizeOffscreenTarget
+  // refuses to allocate one, because a 0x0 framebuffer attachment is itself
+  // a GL_INVALID_VALUE. So without this guard the frame proceeds with no
+  // target and three things silently degrade to the default objects:
+  //
+  //   bindOffscreenTarget()      -> glBindFramebuffer(GL_FRAMEBUFFER, 0),
+  //                                 i.e. the window's back buffer, so the
+  //                                 scene pass draws to the swap chain;
+  //   bindOffscreenColorTexture(0) -> binds texture 0, and sampling texture 0
+  //                                 while framebuffer 0 is bound is a
+  //                                 framebuffer/texture feedback loop, which
+  //                                 is GL_INVALID_OPERATION every frame;
+  //   draw                       -> rasterizes nothing through a 0x0 viewport.
+  //
+  // The error drain then prints one line per frame for as long as the window
+  // stays minimized -- thousands of lines a second in the background, on a
+  // minimized app (#147).
+  if (m_FrameWidth == 0 || m_FrameHeight == 0) {
+    m_Renderer->pollEvents();
+    return;
+  }
+
   float deltaTime = getDeltaTime();
   handleKeyPress(deltaTime);
 
@@ -236,9 +268,24 @@ void Application::handleKeyPress(float deltaTime) {
 
 void Application::handleResizeCallback(void* context, int width, int height) {
   auto* application = static_cast<Application*>(context);
+
+  // Clamp before narrowing. GLFW reports 0 for a minimized window, and
+  // casting a negative to uint32_t would wrap to ~4 billion rather than 0,
+  // which would sail past the 0 checks everywhere downstream (#147).
+  const auto safeWidth = static_cast<std::uint32_t>(std::max(width, 0));
+  const auto safeHeight = static_cast<std::uint32_t>(std::max(height, 0));
+  application->m_FrameWidth = safeWidth;
+  application->m_FrameHeight = safeHeight;
+
+  // A 0x0 resize is recorded but acted on no further: there is no render
+  // target at that size, and Application::update now skips the frame for the
+  // same reason. Without this, setViewport(0, 0, 0, 0) and the aspect-ratio
+  // update would run against a size at which nothing can be drawn.
+  if (safeWidth == 0 || safeHeight == 0) {
+    return;
+  }
+
   application->m_Renderer->setViewport(0, 0, width, height);
-  application->m_FrameWidth = static_cast<std::uint32_t>(width);
-  application->m_FrameHeight = static_cast<std::uint32_t>(height);
   // The projection and the frustum's side planes are both built from the
   // aspect ratio, so it has to be updated here too -- otherwise a resize
   // stretches the view and leaves culling describing a different shape than
