@@ -54,7 +54,15 @@ OpenGLShader::OpenGLShader(OpenGLShader&& other) noexcept
       m_Type(other.m_Type),
       m_Compiled(other.m_Compiled),
       m_CompileLog(std::move(other.m_CompileLog)) {
+  // A moved-from shader must not keep claiming to be compiled. isCompiled()
+  // is the one bit of state callers gate on -- Shader::load throws on
+  // !isCompiled() -- while m_Id is the one GL acts on, and glAttachShader
+  // takes whatever getId() returns. Zeroing only m_Id left the object
+  // reporting "compiled" with no GL name behind it, so a moved-from shader
+  // passed the compile gate and was attached to a program as name 0 (#131).
   other.m_Id = 0;
+  other.m_Compiled = false;
+  other.m_CompileLog.clear();
 }
 
 OpenGLShader& OpenGLShader::operator=(OpenGLShader&& other) noexcept {
@@ -66,7 +74,10 @@ OpenGLShader& OpenGLShader::operator=(OpenGLShader&& other) noexcept {
     m_Type = other.m_Type;
     m_Compiled = other.m_Compiled;
     m_CompileLog = std::move(other.m_CompileLog);
+    // See the move constructor: same stale-flag problem.
     other.m_Id = 0;
+    other.m_Compiled = false;
+    other.m_CompileLog.clear();
   }
   return *this;
 }
