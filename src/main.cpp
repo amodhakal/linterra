@@ -1,5 +1,7 @@
 #include <charconv>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
 #include <print>
 #include <random>
 #include <string_view>
@@ -37,9 +39,32 @@ int main(int argc, char *argv[]) {
 
   Noise::setSeed(seed);
 
-  Application linterra("Linterra");
-  while (linterra.isRunning()) {
-    linterra.update();
+  // Application's constructor throws on several distinct paths -- window
+  // creation, GLAD init, shader compilation, texture loading, and anything
+  // IO raises for a missing file -- and none of them was caught here. An
+  // exception escaping main reaches the implicit catch(...) in the CRT's
+  // startup code, so the user got "terminate called after throwing an
+  // instance of 'std::runtime_error'" plus SIGABRT: a message printed by the
+  // runtime rather than by this program, a core dump, and no hint which
+  // resource was missing or where it was looked for (#144).
+  //
+  // Worse, the leak: ~Application is never reached when the constructor
+  // throws, so ImGui_ImplOpenGL3_Shutdown / ImGui_ImplGlfw_Shutdown /
+  // ImGui::DestroyContext do not run and windowing is not terminated. The
+  // already-constructed members are destroyed (that part is guaranteed), but
+  // the GLFW connection and GL context leak and the window stays mapped on
+  // screen, frozen, until the OS reaps the process -- a force-quit on macOS.
+  try {
+    Application linterra("Linterra");
+    while (linterra.isRunning()) {
+      linterra.update();
+    }
+  } catch (const std::exception &e) {
+    std::println(stderr, "Linterra failed to start: {}", e.what());
+    return EXIT_FAILURE;
+  } catch (...) {
+    std::println(stderr, "Linterra failed to start: unknown error");
+    return EXIT_FAILURE;
   }
 
   return EXIT_SUCCESS;
