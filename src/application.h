@@ -4,6 +4,7 @@
 #include <print>
 
 #include "config.h"
+#include "frametime.h"
 #include "manager.h"
 #include "player.h"
 #include "renderer/renderer_fwd.hpp"
@@ -39,7 +40,13 @@ class Application {
   Texture m_TextureArray;
 
   glm::vec4 m_BgColor;
-  float m_LastFrame;
+  // Carried as a double because IRenderer::getTimeSeconds returns one.
+  // m_LastFrame was a float, so the subtraction happened at glfwGetTime's
+  // output width narrowed to 24 mantissa bits: at t = 1000 s the float quantum
+  // is 2^-10 s, so two consecutive 60 Hz samples can quantise to the same
+  // value (a delta of exactly 0) or differ by a whole quantum (a ~1 ms spike)
+  // with nothing on the CPU having done either (#145).
+  double m_LastFrame;
   bool m_FirstFrame = true;  // skip the first-frame deltaTime (clock started at init)
 
   std::uint32_t m_FrameWidth;   // drawing-buffer size (pixels, may differ from

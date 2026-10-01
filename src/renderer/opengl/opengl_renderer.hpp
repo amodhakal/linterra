@@ -71,7 +71,7 @@ class OpenGLRenderer : public IRenderer {
   bool windowShouldClose() override;
   void swapBuffers() override;
   void pollEvents() override;
-  float getTimeSeconds() override;
+  double getTimeSeconds() override;
   bool isKeyPressed(Key key) override;
   void setWindowShouldClose(bool shouldClose) override;
   void* getNativeWindow() override;

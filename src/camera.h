@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -16,8 +17,18 @@ struct Camera {
 
   float m_Aspect, m_Fov;
   float m_Yaw, m_Pitch;
-  float m_LastX, m_LastY;
-  bool m_IsFirstMouse;
+
+  /** Last reported cursor position, or unset before the first movement event.
+   *
+   *  There is no meaningful value to seed this with: GLFW reports the
+   *  platform's absolute cursor position once the pointer is grabbed, and that
+   *  is essentially never the centre of the window. Seeding from
+   *  SCR_WIDTH/SCR_HEIGHT (as this used to) made the first event carry a
+   *  spurious delta of however far the pointer was from (400, 300), which at
+   *  SENSITIVITY = 0.2 is tens of degrees of yaw on the first mouse movement.
+   *  Being unset until the first event is what lets Player::processMouseInput
+   *  swallow that event instead (#139). */
+  std::optional<glm::vec2> m_LastCursorPos;
 
   Camera(glm::vec3 position);
 

@@ -97,6 +97,31 @@ constexpr std::int32_t MAX_BLOCK_HEIGHT =
 // Columns are filled with opaque WATER blocks from WATER_LEVEL down to the
 // solid terrain surface, so lakes/pools read as flat water at this height.
 constexpr std::int32_t WATER_LEVEL = 45;
+
+/** True when a column with this terrain surface is under the water line.
+ *
+ *  This is the predicate Chunk::generateMesh's water pass uses, restated here
+ *  so the mesher and the ground query read it from one place. It has to be one
+ *  place: the mesher draws a flat, *opaque* water plane at WATER_LEVEL over
+ *  every submerged column, into the same mesh as the terrain, so for those
+ *  columns the surface a player can see and stand on is the water line and
+ *  the terrain surface is up to 45 blocks below it and completely hidden
+ *  (#134). Two copies of the rule would drift, and the drift is invisible
+ *  until the player is standing inside an opaque blue box with no horizon and
+ *  no way to tell why. */
+[[nodiscard]] constexpr bool isSubmerged(std::uint16_t terrainHeight) {
+  return terrainHeight < static_cast<std::uint16_t>(WATER_LEVEL);
+}
+
+/** The surface a player can stand on: the water line if the column is
+ *  submerged, otherwise the terrain surface.
+ *
+ *  This is what the ground query answers with, not the raw heightmap value. */
+[[nodiscard]] constexpr float walkableSurfaceY(std::uint16_t terrainHeight) {
+  return isSubmerged(terrainHeight) ? static_cast<float>(WATER_LEVEL)
+                                   : static_cast<float>(terrainHeight);
+}
+
 constexpr std::int32_t MAX_GENERATION_THREADS = 100;
 }  // namespace Chunk
 

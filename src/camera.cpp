@@ -19,11 +19,6 @@ Camera::Camera(glm::vec3 position) {
 
   m_Yaw = Constants::Camera::DEFAULT_YAW;
   m_Pitch = Constants::Camera::DEFAULT_PITCH;
-
-  m_LastX = Constants::SCR_WIDTH / 2.0;
-  m_LastY = Constants::SCR_HEIGHT / 2.0;
-
-  m_IsFirstMouse = true;
 }
 
 glm::mat4 Camera::getView() {

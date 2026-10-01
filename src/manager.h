@@ -102,7 +102,19 @@ public:
   // rather than leaving that to member destruction after the context is gone.
   void shutdown();
 
-  float getPositionHighestY(const glm::vec3 &cameraPosition);
+  // The height of the surface under `cameraPosition`, or false if there is
+  // none to report.
+  //
+  // Absence has to be representable. The function used to answer
+  // Constants::Chunk::HEIGHT (256) for a chunk that had not streamed in yet,
+  // which is a value that is always above the player, so Player::update read
+  // it as an authoritative floor and snapped the player *up* to 258 --
+  // permanently, since nothing above the world can ever be fallen onto
+  // (#133). A bool plus an out-parameter makes that impossible to ignore at
+  // the call site: outHeight is written only on a true return, and callers
+  // that ignore the bool are ignoring it visibly.
+  [[nodiscard]] bool tryGetGroundHeight(const glm::vec3 &cameraPosition,
+                                        float &outHeight) const;
 
 private:
   static float getChunkDistanceSquared(const glm::ivec2 &chunkPos,
