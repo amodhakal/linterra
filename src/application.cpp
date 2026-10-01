@@ -128,9 +128,17 @@ Application::Application(const char* title, const std::uint32_t width, const std
 }
 
 Application::~Application() {
-  // Only the ImGui teardown belongs here. Windowing is torn down by
-  // ~OpenGLRenderer, which runs after this body and after every member below
-  // has been destroyed -- so the context outlives every GL object (#128).
+  // Stop the mesher before anything else. ~ChunkManager would otherwise drain
+  // the whole backlog -- up to 1024 full 16 x 256 chunk meshes -- so pressing
+  // Escape left the process spinning with no window for as long as that took
+  // (#157). Doing it here also releases the chunks while the GL context is
+  // still current, instead of after ~OpenGLRenderer has terminated windowing
+  // (#128).
+  m_ChunkManager.shutdown();
+
+  // Only the ImGui teardown belongs here beyond that. Windowing is torn down
+  // by ~OpenGLRenderer, which runs after this body and after every member
+  // below has been destroyed -- so the context outlives every GL object (#128).
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();

@@ -5,8 +5,10 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <utility>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 
 #include "doctest/doctest.h"
 #include "threadpool.h"
@@ -63,6 +65,47 @@ bool WaitUntil(Predicate predicate) {
   return true;
 }
 
+// A pool that drains its backlog before joining.
+//
+// ~ThreadPool now *discards* queued work, which is what shutdown wants (#157):
+// nothing will upload or draw a chunk meshed after the window is gone. Tests
+// that assert "every queued task ran" need the opposite contract, and they
+// need to ask for it explicitly -- which is the point of making shutdown a
+// policy rather than an accident of the destructor's implementation.
+class DrainingPool {
+ public:
+  DrainingPool() = default;
+
+  // Drains on destruction, so a test that queues work and then asserts on it
+  // behaves as it did before the policy was introduced.
+  ~DrainingPool() {
+    m_Pool->requestShutdown(/*discardPending=*/false);
+    // Joining is what makes the drain observable: requestShutdown only sets
+    // the flag and wakes the workers, so without this the test reads its
+    // counters while tasks are still running.
+    m_Pool->waitForShutdown();
+  }
+
+  ThreadPool& operator*() { return *m_Pool; }
+  ThreadPool* operator->() { return m_Pool.get(); }
+
+  // Forwarded so the tests read exactly as they did against a ThreadPool.
+  template <typename F>
+  bool tryEnqueue(F &&func, std::size_t maxPendingTasks) {
+    return m_Pool->tryEnqueue(std::forward<F>(func), maxPendingTasks);
+  }
+
+  DrainingPool(const DrainingPool&) = delete;
+  DrainingPool& operator=(const DrainingPool&) = delete;
+
+ private:
+  // A pointer, not a member: ~DrainingPool's body runs *before* its members
+  // are destroyed, but a ThreadPool member would already have run ~ThreadPool
+  // -- which discards the backlog -- by the time the body could ask for a
+  // drain. Holding it indirectly is what makes the request meaningful.
+  std::unique_ptr<ThreadPool> m_Pool = std::make_unique<ThreadPool>();
+};
+
 }  // namespace
 
 TEST_CASE("ThreadPool runs accepted tasks") {
@@ -70,7 +113,7 @@ TEST_CASE("ThreadPool runs accepted tasks") {
   constexpr int kTasks = 200;
 
   {
-    ThreadPool pool;
+    DrainingPool pool;
     for (int i = 0; i < kTasks; ++i) {
       pool.tryEnqueue([&counter] { counter.fetch_add(1); }, kTasks);
     }
@@ -88,7 +131,7 @@ TEST_CASE("ThreadPool runs tasks on more than one thread") {
   auto secondRan = std::make_shared<std::atomic<bool>>(false);
 
   {
-    ThreadPool pool;
+    DrainingPool pool;
 
     pool.tryEnqueue(
         [secondRan] {
@@ -105,7 +148,7 @@ TEST_CASE("ThreadPool runs tasks on more than one thread") {
 }
 
 TEST_CASE("ThreadPool tryEnqueue rejects when the cap cannot be met") {
-  ThreadPool pool;
+  DrainingPool pool;
   std::atomic<int> ran{0};
 
   // A cap of zero is unsatisfiable by construction, so every enqueue is
@@ -123,8 +166,11 @@ TEST_CASE("ThreadPool tryEnqueue refuses work past the pending cap") {
   // observe it -- otherwise idle workers drain the queue as fast as it is
   // filled and the cap is never reached.
   auto gate = std::make_shared<Gate>();
-  const unsigned workerCount =
-      std::max(2u, std::thread::hardware_concurrency());
+  // Matches ThreadPool's own sizing: one fewer than the hardware count, so
+  // the render thread keeps a core. ThreadPool exposes the effective count so
+  // this cannot drift again (#157).
+  const unsigned hardware = std::thread::hardware_concurrency();
+  const unsigned workerCount = std::max(1u, hardware > 1 ? hardware - 1 : 1u);
   constexpr std::size_t kCap = 4;
 
   bool allEnqueued = true;
@@ -132,7 +178,7 @@ TEST_CASE("ThreadPool tryEnqueue refuses work past the pending cap") {
   unsigned parkedCount = 0;
 
   {
-    ThreadPool pool;
+    DrainingPool pool;
 
     for (unsigned i = 0; i < workerCount; ++i) {
       if (!pool.tryEnqueue([gate] { gate->Park(); }, workerCount + 8)) {
@@ -173,7 +219,7 @@ TEST_CASE("ThreadPool runs every task exactly once") {
   constexpr int kTasks = 400;
 
   {
-    ThreadPool pool;
+    DrainingPool pool;
     for (int i = 0; i < kTasks; ++i) {
       pool.tryEnqueue(
           [state] {
@@ -225,7 +271,7 @@ TEST_CASE("ThreadPool survives a task that throws") {
   auto laterRan = std::make_shared<std::atomic<bool>>(false);
 
   {
-    ThreadPool pool;
+    DrainingPool pool;
     // std::runtime_error rather than std::bad_alloc: the point is that an
     // exception must not escape, not which exception type.
     REQUIRE(pool.tryEnqueue(
@@ -256,7 +302,7 @@ TEST_CASE("ThreadPool survives a task that throws a non-std exception") {
   auto laterRan = std::make_shared<std::atomic<bool>>(false);
 
   {
-    ThreadPool pool;
+    DrainingPool pool;
     REQUIRE(pool.tryEnqueue([] { throw 42; }, 8));
     pool.tryEnqueue([laterRan] { laterRan->store(true); }, 8);
     REQUIRE(WaitUntil([laterRan] { return laterRan->load(); }));
@@ -272,7 +318,7 @@ TEST_CASE("ThreadPool keeps running after many throwing tasks") {
   auto good = std::make_shared<std::atomic<int>>(0);
 
   {
-    ThreadPool pool;
+    DrainingPool pool;
     for (int i = 0; i < 100; ++i) {
       pool.tryEnqueue(
           [] { throw std::runtime_error("deliberate test failure"); }, 256);
@@ -285,4 +331,123 @@ TEST_CASE("ThreadPool keeps running after many throwing tasks") {
   }
 
   CHECK(good->load() == 100);
+}
+
+TEST_CASE("ThreadPool destruction discards the backlog instead of draining") {
+  // Pressing Escape used to leave the process spinning with no window while
+  // the pool meshed every remaining chunk -- up to 1024 full 16 x 256 chunk
+  // meshes, potentially seconds of 100% CPU. From the user's point of view
+  // the app "wouldn't quit" (#157).
+  //
+  // The queued work is worthless at that point: nothing will upload or draw a
+  // chunk meshed after the window is gone.
+  //
+  // The measurement is a wall-clock bound rather than a counter, because the
+  // thing being prevented is time. Each task blocks on a gate that is never
+  // opened, so a draining implementation cannot finish until the timeout,
+  // while a discarding one returns promptly.
+  auto state = std::make_shared<std::atomic<int>>(0);
+  auto started = std::make_shared<std::atomic<int>>(0);
+  auto release = std::make_shared<Gate>();
+  constexpr int kBlockedTasks = 64;
+
+  const auto begin = std::chrono::steady_clock::now();
+  {
+    ThreadPool pool;
+    for (int i = 0; i < kBlockedTasks; ++i) {
+      pool.tryEnqueue(
+          [state, started, release] {
+            started->fetch_add(1, std::memory_order_release);
+            release->Park();  // never opened
+            state->fetch_add(1, std::memory_order_release);
+          },
+          kBlockedTasks);
+    }
+    // Let the workers pick up work and block on the gate. Bounded: if they do
+    // not all start, the destructor still has a finite queue to discard.
+    WaitUntil([started] {
+      return started->load(std::memory_order_acquire) >= 1;
+    });
+    // Release so a draining implementation could not deadlock here rather than
+    // merely being slow -- the point is the discard, not a hang.
+    release->Release();
+  }  // destructor: must discard, not drain
+  const auto elapsed = std::chrono::steady_clock::now() - begin;
+
+  INFO("destruction took "
+       << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+       << "ms");
+  CHECK_MESSAGE(elapsed < std::chrono::seconds(5),
+                "destruction was slow, which suggests the backlog was drained "
+                "rather than discarded");
+
+  // Far fewer than kBlockedTasks ran, because the backlog was discarded. A
+  // draining destructor would run all 64. The exact count depends on how many
+  // workers had picked up a task before the queue was swapped out, so this is
+  // an upper bound: no worker can start a task after the swap.
+  CHECK_MESSAGE(state->load(std::memory_order_acquire) < kBlockedTasks,
+                "every queued task ran, so the backlog was drained rather than "
+                "discarded");
+  CHECK(state->load(std::memory_order_acquire) <= kBlockedTasks);
+}
+
+TEST_CASE("ThreadPool requestShutdown with discard drops queued work") {
+  // The same policy, asked for explicitly rather than relied upon from the
+  // destructor. This is what ChunkManager::shutdown uses (#157).
+  auto ran = std::make_shared<std::atomic<int>>(0);
+  auto release = std::make_shared<Gate>();
+  constexpr int kTasks = 32;
+
+  {
+    ThreadPool pool;
+    // One task parks a worker; the rest queue up behind it.
+    pool.tryEnqueue(
+        [release] { release->Park(); }, kTasks);
+    for (int i = 0; i < kTasks - 1; ++i) {
+      pool.tryEnqueue(
+          [ran] { ran->fetch_add(1, std::memory_order_release); }, kTasks);
+    }
+
+    pool.requestShutdown(/*discardPending=*/true);
+    release->Release();
+    pool.waitForShutdown();
+  }
+
+  // The backlog was discarded, so most of the queued tasks never ran. The one
+  // that was already executing may have completed, so the assertion is an
+  // upper bound rather than an exact count.
+  INFO("ran " << ran->load() << " of " << (kTasks - 1) << " queued tasks");
+  CHECK_MESSAGE(ran->load(std::memory_order_acquire) < kTasks - 1,
+                "expected the queued tasks to be discarded, but all of them "
+                "ran");
+}
+
+TEST_CASE("ThreadPool requestShutdown without discard runs everything") {
+  // The opposite policy, so the flag is doing the work rather than the
+  // discard being incidental.
+  auto ran = std::make_shared<std::atomic<int>>(0);
+  constexpr int kTasks = 64;
+
+  {
+    ThreadPool pool;
+    for (int i = 0; i < kTasks; ++i) {
+      pool.tryEnqueue(
+          [ran] { ran->fetch_add(1, std::memory_order_release); }, kTasks);
+    }
+    pool.requestShutdown(/*discardPending=*/false);
+    pool.waitForShutdown();
+  }
+
+  CHECK(ran->load(std::memory_order_acquire) == kTasks);
+}
+
+TEST_CASE("ThreadPool is not copyable or movable") {
+  // Stated rather than left to fail as ill-formed by accident: the pool owns
+  // threads and a mutex, and std::mutex being non-copyable is an accident of
+  // the implementation, not a declaration of intent (#157).
+  static_assert(!std::is_copy_constructible_v<ThreadPool>);
+  static_assert(!std::is_copy_assignable_v<ThreadPool>);
+  static_assert(!std::is_move_constructible_v<ThreadPool>);
+  static_assert(!std::is_move_assignable_v<ThreadPool>);
+  CHECK(true);
 }

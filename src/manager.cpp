@@ -66,6 +66,31 @@ void ChunkManager::load() {
   }
 }
 
+void ChunkManager::shutdown() {
+  // Discard the backlog first, so the workers stop picking up new meshing work
+  // before the chunks they are meshing into start being released.
+  m_ThreadPool.requestShutdown(/*discardPending=*/true);
+
+  // Release every chunk's GL objects now, while the context is still current.
+  // Left to member destruction this happens after ~OpenGLRenderer has
+  // terminated windowing (#128), so this is the ordering fix and the discard
+  // is the responsiveness fix -- both matter here.
+  for (auto &entry : m_ProcessingChunks) {
+    entry.second.chunk.cleanup();
+  }
+  m_ProcessingChunks.clear();
+  m_ProcessingPositions.clear();
+
+  for (auto &entry : m_ProcessedChunks) {
+    entry.second.cleanup();
+  }
+  m_ProcessedChunks.clear();
+
+  if (m_HeightMapSSBO) {
+    m_HeightMapSSBO.reset();
+  }
+}
+
 void ChunkManager::render(const Camera *camera, Shader &shader) {
   const glm::vec3 cameraPosition = camera->m_Position;
 

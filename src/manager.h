@@ -90,6 +90,18 @@ public:
 
   void render(const Camera *camera, Shader &shader);
 
+  // Stop the mesher pool, discarding whatever is still queued.
+  //
+  // Called from ~Application before any teardown, because the pool drains
+  // otherwise: every queued task is a full 16 x 256 chunk mesh and the backlog
+  // reaches 1024, so pressing Escape leaves the process at 100% CPU with no
+  // window for as long as it takes to mesh the remainder -- potentially
+  // seconds, for chunks nothing will ever upload or draw (#157).
+  //
+  // Also releases the chunks themselves while the GL context is still alive,
+  // rather than leaving that to member destruction after the context is gone.
+  void shutdown();
+
   float getPositionHighestY(const glm::vec3 &cameraPosition);
 
 private:
