@@ -4,7 +4,12 @@
 #include <print>
 
 ThreadPool::ThreadPool() {
-  const auto threadCount = std::max(2u, std::thread::hardware_concurrency());
+  // Leave a core for the render thread. N workers plus the main thread on an
+  // N-core machine means the render thread is guaranteed to be descheduled
+  // during a mesh burst (#157).
+  const unsigned hardware = std::thread::hardware_concurrency();
+  const auto threadCount =
+      std::max(1u, hardware > 1 ? hardware - 1 : 1u);
   m_Workers.reserve(threadCount);
   for (unsigned i = 0; i < threadCount; ++i) {
     m_Workers.emplace_back([this] {
@@ -42,14 +47,32 @@ ThreadPool::ThreadPool() {
   }
 }
 
-ThreadPool::~ThreadPool() {
+void ThreadPool::requestShutdown(bool discardPending) {
   {
     std::unique_lock lock(m_Mutex);
+    if (discardPending) {
+      // Swap the backlog out and let it destruct. Draining instead means the
+      // destructor joins workers that keep meshing 16 x 256 chunks that
+      // nothing will ever upload or draw (#157).
+      std::queue<std::function<void()>> discarded;
+      m_Tasks.swap(discarded);
+    }
     m_Stop = true;
   }
 
   m_Condition.notify_all();
+}
+
+void ThreadPool::waitForShutdown() {
   for (auto &worker : m_Workers) {
-    worker.join();
+    if (worker.joinable()) {
+      worker.join();
+    }
   }
+}
+
+ThreadPool::~ThreadPool() {
+  // Discard, not drain -- see requestShutdown.
+  requestShutdown(/*discardPending=*/true);
+  waitForShutdown();
 }
