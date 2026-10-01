@@ -79,7 +79,7 @@ class OpenGLRenderer : public IRenderer {
   void bindFramebuffer(std::uint32_t framebufferId) override;
   std::uint32_t getLastError() override;
   void bindTexture2D(std::uint32_t textureId, std::int32_t unit) override;
-  void resizeOffscreenTarget(std::uint32_t width, std::uint32_t height) override;
+  bool resizeOffscreenTarget(std::uint32_t width, std::uint32_t height) override;
   void bindOffscreenTarget() override;
   void bindOffscreenColorTexture(std::int32_t unit) override;
 

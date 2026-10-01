@@ -243,8 +243,23 @@ void Application::handleResizeCallback(void* context, int width, int height) {
   // the one being drawn.
   application->m_Player.getCamera()->setAspect(application->m_FrameWidth,
                                                 application->m_FrameHeight);
-  application->m_Renderer->resizeOffscreenTarget(
-      static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
+
+  // Reported, not thrown: this runs inside a GLFW C callback, where an
+  // escaping exception is undefined behaviour. resizeOffscreenTarget has
+  // already written a diagnostic naming the size and the GL status, so
+  // repeating it here would add nothing -- what matters is that the rejection
+  // is not swallowed by a caller that looks like it succeeded.
+  if (!application->m_Renderer->resizeOffscreenTarget(
+          static_cast<std::uint32_t>(width),
+          static_cast<std::uint32_t>(height))) {
+    // The offscreen target still holds the previous size. m_FrameWidth /
+    // m_FrameHeight have already been updated above, so they now disagree
+    // with it; #143 fixes that ordering by validating before publishing.
+    std::println(stderr,
+                 "resize rejected by the driver; the offscreen target is "
+                 "still {}x{}",
+                 application->m_FrameWidth, application->m_FrameHeight);
+  }
 }
 
 void Application::handleMouseCallback(void* context, double xPosition,

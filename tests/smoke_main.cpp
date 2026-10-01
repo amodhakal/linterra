@@ -394,8 +394,28 @@ int main() {
     // before the fog pass composites it. That target is created and resized
     // through IRenderer, so it is covered here even though Application (which
     // normally drives it) is not part of this target.
-    renderer->resizeOffscreenTarget(64, 64);
-    Report("resizeOffscreenTarget", true);
+    Report("resizeOffscreenTarget (valid size)",
+           renderer->resizeOffscreenTarget(64, 64));
+
+    // A rejected resize must report failure rather than throwing. This is
+    // reached from a GLFW C callback via glfwPollEvents, where an escaping
+    // exception is undefined behaviour: it unwinds into GLFW's C frames,
+    // which carry no exception tables, and lands at the thread entry as
+    // "terminate called after throwing an instance of std::runtime_error"
+    // plus SIGABRT, with no stack preserved (#142).
+    //
+    // A zero dimension is the rejection that can be provoked deterministically
+    // on every driver. It is the same early-out the driver-rejection path
+    // takes, so it exercises the "returns false, does not throw" contract
+    // rather than pretending to exercise an OOM.
+    Report("resizeOffscreenTarget rejects a zero dimension",
+           !renderer->resizeOffscreenTarget(0, 128));
+    Report("resizeOffscreenTarget rejects a zero height",
+           !renderer->resizeOffscreenTarget(128, 0));
+    // A resize to the size it already holds is a no-op success, not a
+    // rejection -- the common case during a drag must not look like a failure.
+    Report("resizeOffscreenTarget to its current size reports success",
+           renderer->resizeOffscreenTarget(64, 64));
 
     renderer->bindOffscreenTarget();
     Report("bindOffscreenTarget", true);

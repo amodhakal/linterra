@@ -348,12 +348,24 @@ std::uint32_t OpenGLRenderer::getLastError() {
   return glGetError();
 }
 
-void OpenGLRenderer::resizeOffscreenTarget(std::uint32_t width,
+bool OpenGLRenderer::resizeOffscreenTarget(std::uint32_t width,
                                            std::uint32_t height) {
-  if (width == 0 || height == 0) return;
+  // Never throws. This is reached from a GLFW C callback by way of
+  // glfwPollEvents, and GLFW's frames carry no exception tables, so an
+  // exception unwinding out of one is undefined behaviour -- on the macOS
+  // toolchain it walks into C frames with no handler and lands at the thread
+  // entry, giving "terminate called after throwing an instance of
+  // std::runtime_error" and SIGABRT with no stack preserved (#142).
+  //
+  // The failure is self-reinforcing: an incomplete framebuffer is exactly
+  // what a driver gives when it refuses an allocation, and a window resize is
+  // when allocation pressure peaks.
+  if (width == 0 || height == 0) {
+    return false;
+  }
   if (m_OffscreenWidth == width && m_OffscreenHeight == height &&
       m_OffscreenFbo != 0) {
-    return;
+    return true;
   }
 
   destroyOffscreenTarget();
@@ -383,11 +395,23 @@ void OpenGLRenderer::resizeOffscreenTarget(std::uint32_t width,
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
                             m_OffscreenDepthRbo);
 
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    throw std::runtime_error("Framebuffer is not complete");
+  const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE) {
+    const GLenum error = glGetError();
+    std::fprintf(stderr,
+                 "resizeOffscreenTarget: framebuffer incomplete (status "
+                 "0x%04x, GL error 0x%04x) at %ux%u\n",
+                 static_cast<unsigned>(status), static_cast<unsigned>(error),
+                 width, height);
+    // Unbind before returning. Leaving an incomplete FBO bound means every
+    // subsequent draw goes nowhere, which turns one rejected resize into a
+    // silently blank frame rather than a diagnosable one.
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return false;
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  return true;
 }
 
 void OpenGLRenderer::bindOffscreenTarget() {
