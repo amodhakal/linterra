@@ -288,6 +288,55 @@ int main() {
     }
     ReportGlErrors("shader stage is error-free");
 
+    // --- A reload invalidates every cached uniform location (#130) --------
+    // A uniform location is not a name; it is an integer slot the GL linker
+    // assigns for one specific program object. Two programs built from the
+    // same source get unrelated slot assignments, and load() replaces the
+    // program object.
+    //
+    // So load()/loadCompute() must drop the location cache. Without that, a
+    // reload leaves every setter writing through an integer that now refers
+    // to a slot in a program that no longer exists -- the write lands on
+    // whatever uniform happens to occupy that index, or is discarded, with no
+    // GL error and no log line. The scene then renders wrong and the bug gets
+    // attributed to the mesh or the frustum.
+    {
+      Shader reload(renderer.get());
+      reload.load(Constants::FOG_VERTEX_PATH, Constants::FOG_FRAGMENT_PATH);
+      reload.newUniform("uScene");
+      reload.newUniform("uFogEnd");
+      const int firstScene = reload.uniformLocation("uScene");
+      const int firstEnd = reload.uniformLocation("uFogEnd");
+      Report("uniform locations resolve before the reload",
+             firstScene >= 0 && firstEnd >= 0,
+             "uScene=" + std::to_string(firstScene) +
+                 " uFogEnd=" + std::to_string(firstEnd));
+
+      // Reload in place. m_Program.reset() already ran by the time the
+      // constructor of the new program finishes; the cache must not survive.
+      reload.load(Constants::FOG_VERTEX_PATH, Constants::FOG_FRAGMENT_PATH);
+
+      // Read the state back rather than inferring it from the absence of a GL
+      // error: a write through a stale location is perfectly legal from GL's
+      // point of view, so glGetError() would say nothing.
+      Report("a reload drops the cached uniform locations",
+             !reload.hasUniform("uScene") && !reload.hasUniform("uFogEnd"),
+             "locations survived the reload");
+
+      // Re-registering after the reload resolves against the new program, and
+      // the values then land where they are meant to.
+      reload.newUniform("uScene");
+      reload.newUniform("uFogEnd");
+      Report("uniforms re-resolve after a reload",
+             reload.hasUniform("uScene") && reload.hasUniform("uFogEnd") &&
+                 reload.uniformLocation("uScene") >= 0 &&
+                 reload.uniformLocation("uFogEnd") >= 0);
+      reload.use();
+      reload.setUniformInt("uScene", 0);
+      reload.setUniformFloat("uFogEnd", Constants::Chunk::FOG_END);
+      ReportGlErrors("writing through re-resolved locations is error-free");
+    }
+
     // --- Chunk generation and GPU upload ----------------------------------
     // generateMeshData + generateMesh is the CPU half of the pipeline; pass()
     // is the hand-off that creates the VBO/EBO/VAO and uploads. This is the
