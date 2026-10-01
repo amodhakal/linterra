@@ -417,6 +417,71 @@ int main() {
     Report("resizeOffscreenTarget to its current size reports success",
            renderer->resizeOffscreenTarget(64, 64));
 
+    // --- A rejected resize must leave the target usable (#143) ------------
+    // The defect: the requested size was published to m_OffscreenWidth /
+    // m_OffscreenHeight *before* the framebuffer was known to be complete,
+    // while destroyOffscreenTarget() had already cleared the real one. The
+    // early-out above trusts that cache whenever m_OffscreenFbo != 0, and a
+    // failed resize leaves exactly that -- a nonzero name with incomplete
+    // attachments. So
+    //
+    //     rejected size A -> rejected size B -> back to A
+    //
+    // hit the early-out on the third call and did nothing, leaving B's
+    // incomplete attachments bound. Every later frame rendered into an
+    // incomplete framebuffer with no error, no crash and no log line.
+    //
+    // Two things are asserted, and the second is the one that discriminates.
+    //
+    // 1. The over-limit request is refused, and refused *without touching
+    //    GL*. Pre-fix there was no limit check, so the request reached
+    //    glTexImage2D, which on this driver silently clamps an oversized
+    //    2D allocation and leaves the texture unallocated without raising an
+    //    error -- the failure only appeared one step later as an incomplete
+    //    framebuffer, by which point the old target was already destroyed.
+    //    So "no GL error" alone does not distinguish the two; what does is
+    //    that the driver is never asked.
+    //
+    // 2. The target that was working before the rejected sequence is still
+    //    live afterwards, and still usable. This is the invariant the wedge
+    //    broke, and it holds only if the members are published after
+    //    validation.
+    {
+      GLint maxRenderbuffer = 0;
+      GLint maxTexture = 0;
+      glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbuffer);
+      glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTexture);
+      // Both limits matter and are not the same value on every driver:
+      // GL_MAX_TEXTURE_SIZE is frequently the lower one, and checking only
+      // the renderbuffer limit is exactly the naive check that lets a width
+      // through to fail in glTexImage2D instead.
+      const GLint limit =
+          maxRenderbuffer < maxTexture ? maxRenderbuffer : maxTexture;
+      if (limit <= 0) {
+        std::printf("  skip  over-limit resize: driver reports no limit\n");
+      } else {
+        const auto overA = static_cast<std::uint32_t>(limit) + 4096;
+        const auto overB = static_cast<std::uint32_t>(limit) + 8192;
+
+        Report("over-limit resize A is rejected",
+               !renderer->resizeOffscreenTarget(overA, 128));
+        Report("over-limit resize B is rejected",
+               !renderer->resizeOffscreenTarget(overB, 128));
+        Report("returning to a rejected size is rejected, not a cached no-op",
+               !renderer->resizeOffscreenTarget(overA, 128));
+        ReportGlErrors("rejected resizes left no GL error behind");
+
+        // The invariant. Pre-fix, destroyOffscreenTarget() ran first and the
+        // cache was poisoned, so what survived the sequence was a
+        // nonzero-but-incomplete name and this resize could not recover.
+        Report("a valid resize still succeeds after rejected ones",
+               renderer->resizeOffscreenTarget(96, 96));
+        renderer->bindOffscreenTarget();
+        renderer->clear(glm::vec4(0.1f, 0.2f, 0.3f, 1.0f));
+        ReportGlErrors("offscreen target is usable after rejected resizes");
+      }
+    }
+
     renderer->bindOffscreenTarget();
     Report("bindOffscreenTarget", true);
 
