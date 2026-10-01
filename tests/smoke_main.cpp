@@ -31,6 +31,7 @@
 #include "config.h"
 #include "io.h"
 #include "renderer/opengl/gl_texture_type.hpp"
+#include "renderer/opengl/opengl_shader.hpp"
 #include "renderer/renderer.hpp"
 #include "shader.h"
 
@@ -224,6 +225,36 @@ int main() {
              vs ? vs->getCompileLog() : "null shader");
       Report("fragment shader compiles", fs && fs->isCompiled(),
              fs ? fs->getCompileLog() : "null shader");
+
+      // --- A moved-from shader must not still claim to be compiled (#131) --
+      // Shader::load gates on isCompiled() and then hands the shader to
+      // OpenGLShaderProgram, which attaches whatever getId() returns. A moved-
+      // from OpenGLShader used to zero m_Id while leaving m_Compiled true, so
+      // it reported "compiled" with no GL name behind it: it passed the
+      // compile gate and got attached to a program as shader name 0.
+      //
+      // Asserted on the object, not on glGetError: the stale state is an
+      // ordinary member value, so the only way to see it is to read it back.
+      if (auto concrete =
+              renderer->createShader(ShaderType::Fragment,
+                                     fragmentSource.c_str())) {
+        std::unique_ptr<OpenGLShader> source(
+            static_cast<OpenGLShader*>(concrete.release()));
+        // Move *into* a second object, leaving `source` moved-from.
+        OpenGLShader sink{std::move(*source)};
+        Report("a moved-from shader reports not-compiled",
+               !source->isCompiled(),
+               "isCompiled() stayed true with a zeroed handle");
+        Report("a moved-from shader has no GL name", source->getId() == 0,
+               "getId() = " + std::to_string(source->getId()));
+        Report("a moved-from shader has no compile log",
+               source->getCompileLog().empty());
+        // The moved-to object must be the live one, or the fix would simply
+        // have broken the normal path.
+        Report("the moved-to shader is the live one",
+               sink.isCompiled() && sink.getId() != 0);
+      }
+
       if (vs && vs->isCompiled() && fs && fs->isCompiled()) {
         std::vector<std::unique_ptr<IShader>> stages;
         stages.push_back(std::move(vs));
