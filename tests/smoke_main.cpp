@@ -33,7 +33,9 @@
 #include "renderer/opengl/gl_texture_type.hpp"
 #include "renderer/opengl/opengl_shader.hpp"
 #include "renderer/renderer.hpp"
+#include "filesystem"
 #include "shader.h"
+#include "texture.h"
 
 namespace {
 
@@ -399,6 +401,30 @@ int main() {
       chunk.generateHeightMapCPU(position);
       Report("chunk heightmap (CPU)", true);
 
+      // The mesher reserves its vertex and index storage up front, so the
+      // inner push_back loops cannot reallocate mid-mesh -- a reallocation
+      // there is where std::bad_alloc comes from, on a worker thread where an
+      // escaping exception used to abort the process (#141).
+      //
+      // This reports how the reservation actually compares to what was
+      // emitted, because an over-tight bound would trade a crash for a
+      // reallocation-per-chunk and an over-loose one would reserve hundreds
+      // of MB across 4225 resident chunks. Measured rather than assumed.
+      chunk.generateMesh();
+      const std::size_t verts = chunk.getVertexCount();
+      const std::size_t indices = chunk.getIndexCount();
+      Report("meshing a chunk produces vertices and indices",
+             verts > 0 && indices > 0 && indices % 6 == 0,
+             "verts=" + std::to_string(verts) +
+                 " indices=" + std::to_string(indices));
+      // One quad is 4 vertices and 6 indices, so these must agree. A mismatch
+      // would mean an index was emitted without its corners, which is the
+      // kind of corruption a mid-mesh reallocation would cause.
+      Report("vertex and index counts are consistent for whole quads",
+             verts == (indices / 6) * 4,
+             "verts=" + std::to_string(verts) +
+                 " indices=" + std::to_string(indices));
+
       chunk.generateMeshData(position);
       chunk.generateMesh();
       ReportGlErrors("chunk mesh generation is error-free");
@@ -722,6 +748,53 @@ int main() {
     }
     ReportGlErrors("offscreen color texture binding");
 
+    // --- Textures resolve like shaders do (#146) -------------------------
+    // stbi_load opens with a plain fopen, so a relative path resolves against
+    // the working directory with no fallback -- while the shader path went
+    // through IO::resolvePath, which also tries the executable's directory.
+    // Two subsystems reading the same resources/ tree by two different rules
+    // meant the engine found its shaders and then failed on its textures the
+    // moment it was launched from anywhere but the repo root: a .app bundle,
+    // a CI job invoking the binary by absolute path, any IDE run
+    // configuration, or a wrapper script that sets a working directory.
+    //
+    // This block moves the working directory somewhere unrelated before
+    // loading, so the relative path cannot resolve against the cwd and only
+    // the executable-directory fallback can satisfy it. Pre-fix this threw and
+    // the smoke test exited non-zero.
+    {
+      const std::filesystem::path originalCwd =
+          std::filesystem::current_path();
+      const std::filesystem::path elsewhere =
+          std::filesystem::temp_directory_path() / "linterra_texture_cwd";
+      std::error_code ignored;
+      std::filesystem::create_directories(elsewhere, ignored);
+      std::filesystem::current_path(elsewhere);
+
+      // Guard the premise: the relative path must NOT resolve from here, or
+      // this would pass without exercising the fallback. Report rather than
+      // REQUIRE, since the smoke test has no doctest macros.
+      const bool resolvableFromCwd = std::filesystem::exists(
+          std::filesystem::path(Constants::GRASS_TOP_TEXTURE_PATH));
+      Report("the texture path does not resolve from the working directory",
+             !resolvableFromCwd,
+             "the premise of this check is that it must not");
+
+      Texture texture(renderer.get());
+      bool loaded = true;
+      std::string detail;
+      try {
+        texture.loadFromFiles({Constants::GRASS_TOP_TEXTURE_PATH});
+      } catch (const std::exception &e) {
+        loaded = false;
+        detail = e.what();
+      }
+      std::filesystem::current_path(originalCwd);
+
+      Report("a texture loads with an unrelated working directory", loaded,
+             detail);
+    }
+
     renderer->swapBuffers();
     Report("swapBuffers", true);
 
@@ -731,6 +804,82 @@ int main() {
     std::printf("  FAIL  exception escaped: %s\n", e.what());
     return EXIT_FAILURE;
   }
+
+    // --- A 0x0 drawing buffer must not fall back to the default target (#147)
+    // A minimized window reports a 0x0 drawing buffer, and
+    // resizeOffscreenTarget refuses to allocate a 0x0 framebuffer attachment
+    // (that is itself a GL_INVALID_VALUE). With no target allocated, the old
+    // code silently degraded to the default objects: bindOffscreenTarget
+    // bound framebuffer 0 -- the window's back buffer -- so the scene pass
+    // drew to the swap chain, the fog pass cleared that same buffer and wiped
+    // the scene, and sampling the colour texture afterwards was a
+    // framebuffer/texture feedback loop at GL_INVALID_OPERATION every frame.
+    //
+    // bindOffscreenTarget and bindOffscreenColorTexture now refuse and report
+    // rather than binding 0, so this is checkable: the framebuffer must still
+    // be the default one afterwards, which is what makes the loop.
+    {
+      auto renderless = createRenderer(RenderBackend::OpenGL);
+      Report("renderer for the no-target check",
+             renderless != nullptr);
+      if (renderless) {
+        renderless->initializeWindowing();
+        renderless->configureWindowHints();
+        if (!renderless->createWindow(32, 32, "linterra-renderless")) {
+          std::printf("  skip  no-target check: no GL context\n");
+        } else {
+          renderless->makeContextCurrent();
+          renderless->loadContextFunctions();
+
+          // 0x0 is refused -- the same contract a minimized window hits.
+          Report("a 0x0 drawing buffer is refused",
+                 !renderless->resizeOffscreenTarget(0, 0));
+
+          // Nothing was allocated, so binding must not fall through to the
+          // default framebuffer. Read the binding state back rather than
+          // asserting on glGetError: binding 0 is entirely legal, which is
+          // exactly why the bug was quiet.
+          //
+          // A fresh context already has the default framebuffer bound, so
+          // something non-zero has to be bound first for the two behaviours to
+          // be distinguishable. Pre-#147 bindOffscreenTarget unconditionally
+          // ran glBindFramebuffer(GL_FRAMEBUFFER, m_OffscreenFbo) with the
+          // name still 0 -- the window's back buffer -- so the scene pass drew
+          // to the swap chain, the fog pass cleared that same buffer and wiped
+          // the scene, and sampling the colour texture afterwards was a
+          // framebuffer/texture feedback loop.
+          // A real, generated framebuffer -- binding an arbitrary name like
+          // 7 is rejected by GL, which would make GL_FRAMEBUFFER_BINDING
+          // report 0 regardless of what bindOffscreenTarget does.
+          GLint bound = 0;
+          GLuint probeFbo = 0;
+          glGenFramebuffers(1, &probeFbo);
+          glBindFramebuffer(GL_FRAMEBUFFER, probeFbo);
+          renderless->bindOffscreenTarget();
+          glGetIntegerv(GL_FRAMEBUFFER_BINDING, &bound);
+          Report("binding with no target does not fall back to the default "
+                 "framebuffer",
+                 bound == static_cast<GLint>(probeFbo),
+                 "GL_FRAMEBUFFER_BINDING = " + std::to_string(bound) +
+                     " (0 means it fell back to the default framebuffer, "
+                     "which is the bug)");
+          glDeleteFramebuffers(1, &probeFbo);
+
+          // And a valid size still works, so the refusal is specific to the
+          // unallocated case rather than breaking the normal path.
+          Report("a valid size still allocates after a refusal",
+                 renderless->resizeOffscreenTarget(32, 32));
+          renderless->bindOffscreenTarget();
+          glGetIntegerv(GL_FRAMEBUFFER_BINDING, &bound);
+          Report("a real target binds after allocation", bound != 0,
+                 "GL_FRAMEBUFFER_BINDING = " + std::to_string(bound));
+          ReportGlErrors("no-target and recovery checks left the context "
+                         "error-free");
+        }
+        renderless.reset();
+      }
+    }
+
 
   renderer->terminateWindowing();
   Report("terminateWindowing", true);

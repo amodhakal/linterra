@@ -121,6 +121,14 @@ public:
   /** True once the heightmap data has been read back from the GPU. */
   bool isGpuHeightMapReady() const { return m_GpuHeightMapReady; }
 
+  // Exposed so the up-front reservation in generateMesh() can be checked
+  // against what was actually emitted. The reservation is a heuristic bound,
+  // and a bound nobody measures is a bound nobody notices going wrong.
+  [[nodiscard]] std::size_t getVertexCount() const { return m_Data.size(); }
+  [[nodiscard]] std::size_t getIndexCount() const { return m_Indices.size(); }
+  [[nodiscard]] std::size_t getVertexCapacity() const { return m_Data.capacity(); }
+  [[nodiscard]] std::size_t getIndexCapacity() const { return m_Indices.capacity(); }
+
   void pass();
   void render();
   void cleanup();

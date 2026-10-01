@@ -24,6 +24,20 @@ constexpr auto FOG_VERTEX_PATH = "./shaders/fog.vert";
 constexpr auto FOG_FRAGMENT_PATH = "./shaders/fog.frag";
 constexpr auto TERRAIN_COMPUTE_PATH = "./shaders/terrain.comp";
 
+// Block and water textures. These live here rather than inline at the
+// call site for two reasons: it is the one place that lists on-disk assets,
+// and it makes the ./ prefix uniform with the shader paths above. The
+// original spellings differed -- shaders as "./shaders/render.vert", textures
+// as "resources/blocks/grass_top.png" -- which meant a reader could not tell
+// that one class of path was CWD-independent and the other was not (#146).
+//
+// Every path here must be resolved through IO::resolvePath, not handed
+// straight to an open() or fopen(). stbi_load, for one, opens with a plain
+// fopen and so resolves against the working directory with no fallback.
+constexpr auto GRASS_TOP_TEXTURE_PATH = "./resources/blocks/grass_top.png";
+constexpr auto DIRT_TEXTURE_PATH = "./resources/blocks/dirt.png";
+constexpr auto WATER_TEXTURE_PATH = "./resources/water.jpg";
+
 // Every uniform the terrain compute shader declares. This is the single
 // source of truth: ChunkManager registers exactly these names, and
 // tests/test_shader_uniforms.cpp asserts the list stays equal to the set of

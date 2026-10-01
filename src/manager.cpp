@@ -117,12 +117,34 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       }
     }
 
+    const glm::ivec2 position = it->first;
+
+    // Reap a chunk whose meshing threw. This has to come *before* the
+    // uploadReady check, because a task that threw never sets uploadReady --
+    // so without this the entry sits in m_ProcessingChunks forever, its
+    // position is never released, and the chunk is never retried (#141).
+    // Dropping it is the right outcome: one bad chunk instead of a leak that
+    // grows until the render window is full of entries that can never resolve.
+    if (result.failed.load(std::memory_order_acquire)) {
+      result.chunk.cleanup();
+      // A GPU-path chunk may still hold an SSBO slot: the dispatch was
+      // issued, but the readback will never run for it.
+      if (result.slot != TaskResult::kNoGpuSlot) {
+        m_GpuSlots.release(result.slot);
+        result.slot = TaskResult::kNoGpuSlot;
+      }
+      {
+        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+        m_ProcessingPositions.erase(position);
+        it = m_ProcessingChunks.erase(it);
+      }
+      continue;
+    }
+
     if (!result.uploadReady.load(std::memory_order_acquire)) {
       ++it;
       continue;
     }
-
-    const glm::ivec2 position = it->first;
 
     // Range-check before uploading: if the camera has moved away since this
     // task was enqueued, discard the chunk here instead of paying the GPU
@@ -221,8 +243,25 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
 
         return m_ThreadPool.tryEnqueue(
             [&result, position]() {
-              result.chunk.generateMeshData(position);
-              result.uploadReady.store(true, std::memory_order_release);
+              // The pool itself now guarantees an exception cannot escape a
+              // worker, but only this task body knows *which* chunk failed --
+              // without that the promotion loop would wait on uploadReady for
+              // a chunk that is never coming, stranding its position forever
+              // (#141).
+              try {
+                result.chunk.generateMeshData(position);
+                result.uploadReady.store(true, std::memory_order_release);
+              } catch (const std::exception &e) {
+                std::println(stderr,
+                             "ChunkManager: meshing ({}, {}) failed: {}",
+                             position.x, position.y, e.what());
+                result.failed.store(true, std::memory_order_release);
+              } catch (...) {
+                std::println(stderr,
+                             "ChunkManager: meshing ({}, {}) failed",
+                             position.x, position.y);
+                result.failed.store(true, std::memory_order_release);
+              }
             },
             kMaxPendingTasks);
       }();

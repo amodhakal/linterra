@@ -198,3 +198,52 @@ TEST_CASE("resolvePath falls back to the executable directory") {
   // both sides before comparing.
   CHECK(fs::weakly_canonical(resolved) == fs::weakly_canonical(probe));
 }
+
+TEST_CASE("a failed open names every location that was searched") {
+  // The most common startup failure is a missing shader or texture, and it
+  // used to produce the least useful possible message:
+  //
+  //   Couldn't open file: ./shaders/render.vert
+  //
+  // resolvePath tries the working directory and then falls back to the
+  // executable's directory, but on total failure it returns the input
+  // unchanged -- so the message named only the first of the two. The path
+  // reported was relative to a working directory that typically has nothing
+  // to do with where the binary lives, and it never mentioned that the
+  // executable directory had also been searched. That is the location that
+  // usually explains the failure: shaders/ or resources/ not copied next to
+  // the binary (#144).
+  const std::string name = uniqueName();
+  const fs::path elsewhere =
+      fs::temp_directory_path() / ("linterra_openfail_" + name);
+  const FileRemover removeCwdDir{elsewhere};
+  fs::create_directories(elsewhere);
+  const CwdGuard restoreCwd{fs::current_path()};
+  fs::current_path(elsewhere);
+
+  // Guard the premise: the file must be absent from both locations, or the
+  // open would succeed and this would assert nothing.
+  const fs::path relative = fs::path(name);
+  REQUIRE_FALSE(fs::exists(relative));
+  REQUIRE_FALSE(fs::exists(executableDir() / relative));
+
+  std::string message;
+  try {
+    (void)IO::getFullFileContents(name.c_str());
+    FAIL("expected getFullFileContents to throw for a missing file");
+  } catch (const std::exception &e) {
+    message = e.what();
+  }
+
+  // Both searched locations must be named, so the reader can tell "wrong
+  // working directory" from "assets not installed next to the binary".
+  INFO("message was: " << message);
+  CHECK_MESSAGE(message.find(name) != std::string::npos,
+                "the missing file is not named");
+  CHECK_MESSAGE(message.find("searched") != std::string::npos,
+                "the message does not say where it looked");
+  const std::string exeDir = executableDir().string();
+  CHECK_MESSAGE(message.find(exeDir) != std::string::npos,
+                "the executable's directory is not named, which is the "
+                "location that usually explains the failure");
+}

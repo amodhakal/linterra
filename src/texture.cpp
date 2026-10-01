@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "io.h"
 #include "renderer/renderer.hpp"
 
 Texture::Texture(IRenderer* renderer) : m_Renderer(renderer) {}
@@ -51,12 +52,30 @@ void Texture::loadFromFiles(const std::vector<std::string>& paths) {
     int width = 0;
     int height = 0;
     int channels = 0;
+
+    // Through the same resolver the shader path already uses. stbi_load
+    // opens with a plain fopen, so a relative path is resolved against the
+    // working directory with no fallback -- which meant textures and shaders
+    // read from the same resources/ and shaders/ trees by two different
+    // rules. Launching the binary from anywhere but the repo root or the
+    // build directory therefore found the shaders (via the executable-
+    // directory fallback) and failed on the textures (#146).
+    //
+    // A named string, not a temporary: resolvePath returns by value, so
+    // stbi_load(IO::resolvePath(p).c_str(), ...) would hand a pointer into a
+    // temporary destroyed at the end of the full expression. stbi_load copies
+    // before returning so it happens to be safe today, but the dangling form
+    // is a trap for whoever edits it next.
+    const std::string resolved = IO::resolvePath(path.c_str());
     stbi_uc* data =
-        stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
+        stbi_load(resolved.c_str(), &width, &height, &channels, STBI_rgb_alpha);
     if (!data) {
       for (auto* img : images) {
         stbi_image_free(img);
       }
+      // Name the location actually searched, not just the requested path --
+      // see IO::getFullFileContents, which does the same. resolvePath has
+      // already recorded both candidates by the time this runs.
       throw std::runtime_error(std::string("Failed to load texture: ") + path);
     }
     images.push_back(data);
