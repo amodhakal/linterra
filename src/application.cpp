@@ -40,7 +40,6 @@ Application::Application(const char* title, const std::uint32_t width, const std
   m_Renderer->setCursorDisabled();
   m_Renderer->setEventContext(this);
   m_Renderer->setCursorPosCallback(handleMouseCallback);
-  m_Renderer->setFramebufferSizeCallback(handleResizeCallback);
 
   if (!m_Renderer->loadContextFunctions()) {
     throw std::runtime_error("Failed to initialize GLAD");
@@ -106,13 +105,28 @@ Application::Application(const char* title, const std::uint32_t width, const std
   m_FrameWidth = static_cast<std::uint32_t>(fbWidth);
   m_FrameHeight = static_cast<std::uint32_t>(fbHeight);
   m_Renderer->resizeOffscreenTarget(m_FrameWidth, m_FrameHeight);
+
+  // Only now is the resize callback safe to arm. Both preconditions hold:
+  // GLAD has resolved the entry points, so handleResizeCallback no longer
+  // calls through null function pointers; and the offscreen target exists, so
+  // resizeOffscreenTarget has something to act on.
+  //
+  // Registering this before loadContextFunctions() left a window in which
+  // GLFW could dispatch a framebuffer-size event into an unarmed context.
+  // That window is not theoretical on the primary target: the __APPLE__
+  // branches make this the HiDPI configuration, where glfwGetFramebufferSize
+  // on a fresh window commonly differs from the requested 800x600, and GLFW
+  // fires the initial framebuffer-size event on the first glfwPollEvents.
+  m_Renderer->setFramebufferSizeCallback(handleResizeCallback);
 }
 
 Application::~Application() {
+  // Only the ImGui teardown belongs here. Windowing is torn down by
+  // ~OpenGLRenderer, which runs after this body and after every member below
+  // has been destroyed -- so the context outlives every GL object (#128).
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
-  m_Renderer->terminateWindowing();
 }
 
 bool Application::isRunning() {
@@ -231,8 +245,23 @@ void Application::handleResizeCallback(void* context, int width, int height) {
   // the one being drawn.
   application->m_Player.getCamera()->setAspect(application->m_FrameWidth,
                                                 application->m_FrameHeight);
-  application->m_Renderer->resizeOffscreenTarget(
-      static_cast<std::uint32_t>(width), static_cast<std::uint32_t>(height));
+
+  // Reported, not thrown: this runs inside a GLFW C callback, where an
+  // escaping exception is undefined behaviour. resizeOffscreenTarget has
+  // already written a diagnostic naming the size and the GL status, so
+  // repeating it here would add nothing -- what matters is that the rejection
+  // is not swallowed by a caller that looks like it succeeded.
+  if (!application->m_Renderer->resizeOffscreenTarget(
+          static_cast<std::uint32_t>(width),
+          static_cast<std::uint32_t>(height))) {
+    // The offscreen target still holds the previous size. m_FrameWidth /
+    // m_FrameHeight have already been updated above, so they now disagree
+    // with it; #143 fixes that ordering by validating before publishing.
+    std::println(stderr,
+                 "resize rejected by the driver; the offscreen target is "
+                 "still {}x{}",
+                 application->m_FrameWidth, application->m_FrameHeight);
+  }
 }
 
 void Application::handleMouseCallback(void* context, double xPosition,

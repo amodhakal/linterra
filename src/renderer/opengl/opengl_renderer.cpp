@@ -14,7 +14,27 @@
 
 OpenGLRenderer::OpenGLRenderer() = default;
 
-OpenGLRenderer::~OpenGLRenderer() { destroyOffscreenTarget(); }
+OpenGLRenderer::~OpenGLRenderer() {
+  // Two rules, and both orderings matter:
+
+  // 1. Release every GL object this renderer owns *before* terminating
+  //    windowing. ~Application used to call glfwTerminate() from its
+  //    destructor body, which runs before any member is destroyed -- so
+  //    destroyOffscreenTarget() here, ~ChunkManager's per-chunk
+  //    glDeleteBuffers/glDeleteVertexArrays, ~TextureArray's
+  //    glDeleteTextures and ~Shader's glDeleteProgram all ran with no
+  //    current context and GLAD's pointers aimed at an unloaded driver
+  //    image. Undefined behaviour: GL_INVALID_OPERATION spam at best, a hard
+  //    abort inside the driver on Mesa and on strict contexts, across
+  //    thousands of deletions rather than one (#128).
+  destroyOffscreenTarget();
+
+  // 2. Tear down windowing here rather than leaving it to a caller. A
+  //    renderer that owns GL objects owns the context they live in; letting
+  //    the owner decide when to destroy the context is what made the ordering
+  //    possible to get wrong in the first place.
+  terminateWindowing();
+}
 
 void OpenGLRenderer::clear(const glm::vec4& clearColor) {
   glClearColor(clearColor.r, clearColor.g, clearColor.b, clearColor.a);
@@ -210,6 +230,12 @@ void OpenGLRenderer::initializeWindowing() {
 }
 
 void OpenGLRenderer::terminateWindowing() {
+  // Idempotent. ~OpenGLRenderer calls this too, so an explicit call from the
+  // owner (or a second one) must not run glfwTerminate twice.
+  if (m_WindowingTerminated) {
+    return;
+  }
+  m_WindowingTerminated = true;
   glfwTerminate();
 }
 
@@ -271,12 +297,41 @@ void OpenGLRenderer::setScrollCallback(ScrollCallback callback) {
 
 void OpenGLRenderer::setFramebufferSizeCallback(FramebufferSizeCallback callback) {
   m_FramebufferSizeCallback = callback;
+
+  // Arm the callback only once the GL entry points exist. GLFW dispatches
+  // buffered events whenever the platform feels like it, not only from
+  // glfwPollEvents, so a callback registered before GLAD is loaded can run
+  // against a context where every gl* symbol is still a null function
+  // pointer. handleResizeCallback reaches resizeOffscreenTarget, whose first
+  // call is glGenFramebuffers -- a jump to address 0, with no exception and
+  // no diagnostic.
+  //
+  // Refusing is strictly better than arming: the caller can register the
+  // callback before GLAD if it likes, and it simply takes effect on the next
+  // loadContextFunctions() rather than crashing in between. Nothing is lost,
+  // because a resize that happens before the context exists has no GL work to
+  // do anyway.
+  if (!m_ContextFunctionsLoaded) {
+    m_PendingFramebufferSizeCallback = callback;
+    return;
+  }
+
   glfwSetFramebufferSizeCallback(m_Window, dispatchFramebufferSizeCallback);
 }
 
 bool OpenGLRenderer::loadContextFunctions() {
-  return gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) !=
-         0;
+  if (gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) == 0) {
+    return false;
+  }
+  m_ContextFunctionsLoaded = true;
+
+  // Arm anything that was registered before the entry points existed.
+  if (m_PendingFramebufferSizeCallback != nullptr) {
+    glfwSetFramebufferSizeCallback(m_Window,
+                                   dispatchFramebufferSizeCallback);
+    m_PendingFramebufferSizeCallback = nullptr;
+  }
+  return true;
 }
 
 void OpenGLRenderer::getFramebufferSize(int* width, int* height) {
@@ -319,23 +374,68 @@ std::uint32_t OpenGLRenderer::getLastError() {
   return glGetError();
 }
 
-void OpenGLRenderer::resizeOffscreenTarget(std::uint32_t width,
+bool OpenGLRenderer::resizeOffscreenTarget(std::uint32_t width,
                                            std::uint32_t height) {
-  if (width == 0 || height == 0) return;
+  // Never throws. This is reached from a GLFW C callback by way of
+  // glfwPollEvents, and GLFW's frames carry no exception tables, so an
+  // exception unwinding out of one is undefined behaviour -- on the macOS
+  // toolchain it walks into C frames with no handler and lands at the thread
+  // entry, giving "terminate called after throwing an instance of
+  // std::runtime_error" and SIGABRT with no stack preserved (#142).
+  //
+  // The failure is self-reinforcing: an incomplete framebuffer is exactly
+  // what a driver gives when it refuses an allocation, and a window resize is
+  // when allocation pressure peaks.
+  if (width == 0 || height == 0) {
+    return false;
+  }
   if (m_OffscreenWidth == width && m_OffscreenHeight == height &&
       m_OffscreenFbo != 0) {
-    return;
+    return true;
   }
 
-  destroyOffscreenTarget();
-  m_OffscreenWidth = width;
-  m_OffscreenHeight = height;
+  // Validate against the driver's limits before destroying anything. Both
+  // matter and they are not the same limit: some drivers report
+  // GL_MAX_TEXTURE_SIZE below GL_MAX_RENDERBUFFER_SIZE, so a width that
+  // passes a naive renderbuffer check still fails glTexImage2D. Asking for
+  // either allocation above its limit raises GL_INVALID_VALUE and leaves the
+  // object unallocated, which then shows up one step later as an incomplete
+  // framebuffer -- by which point the old target is already gone.
+  GLint maxRenderbufferSize = 0;
+  GLint maxTextureSize = 0;
+  glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &maxRenderbufferSize);
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+  const auto limit = std::min(maxRenderbufferSize, maxTextureSize);
+  if (limit > 0 && (width > static_cast<std::uint32_t>(limit) ||
+                    height > static_cast<std::uint32_t>(limit))) {
+    std::fprintf(stderr,
+                 "resizeOffscreenTarget: %ux%u exceeds the driver limit of "
+                 "%d (GL_MAX_RENDERBUFFER_SIZE=%d, GL_MAX_TEXTURE_SIZE=%d)\n",
+                 width, height, limit, maxRenderbufferSize, maxTextureSize);
+    return false;
+  }
 
-  glGenFramebuffers(1, &m_OffscreenFbo);
-  glBindFramebuffer(GL_FRAMEBUFFER, m_OffscreenFbo);
+  // Build into locals. Publishing the requested size to m_OffscreenWidth /
+  // m_OffscreenHeight before the framebuffer is known to be complete is what
+  // wedged the target permanently: the early-out above trusts the cache when
+  // `m_OffscreenFbo != 0`, and a failed resize leaves exactly that -- a
+  // nonzero name with incomplete attachments. Resizing back to the size the
+  // user just came from then hit the early-out and did nothing at all, so the
+  // renderer drew into a permanently incomplete framebuffer with no error, no
+  // crash and no log line. The unrecoverable case was incomplete size A, then
+  // a different incomplete size B, then back to A.
+  //
+  // So: the previous target stays alive until the replacement is proven
+  // usable, and the members are written only at the end.
+  GLuint fbo = 0;
+  GLuint colorTexture = 0;
+  GLuint depthRbo = 0;
 
-  glGenTextures(1, &m_OffscreenColorTexture);
-  glBindTexture(GL_TEXTURE_2D, m_OffscreenColorTexture);
+  glGenFramebuffers(1, &fbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+
+  glGenTextures(1, &colorTexture);
+  glBindTexture(GL_TEXTURE_2D, colorTexture);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, static_cast<GLsizei>(width),
                static_cast<GLsizei>(height), 0, GL_RGBA, GL_UNSIGNED_BYTE,
                nullptr);
@@ -344,21 +444,46 @@ void OpenGLRenderer::resizeOffscreenTarget(std::uint32_t width,
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                         m_OffscreenColorTexture, 0);
+                         colorTexture, 0);
 
-  glGenRenderbuffers(1, &m_OffscreenDepthRbo);
-  glBindRenderbuffer(GL_RENDERBUFFER, m_OffscreenDepthRbo);
+  glGenRenderbuffers(1, &depthRbo);
+  glBindRenderbuffer(GL_RENDERBUFFER, depthRbo);
   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24,
                         static_cast<GLsizei>(width),
                         static_cast<GLsizei>(height));
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
-                            m_OffscreenDepthRbo);
+                            depthRbo);
 
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    throw std::runtime_error("Framebuffer is not complete");
+  const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE) {
+    const GLenum error = glGetError();
+    std::fprintf(stderr,
+                 "resizeOffscreenTarget: framebuffer incomplete (status "
+                 "0x%04x, GL error 0x%04x) at %ux%u\n",
+                 static_cast<unsigned>(status), static_cast<unsigned>(error),
+                 width, height);
+
+    // Discard the replacement and keep the previous target. Unbind first:
+    // leaving an incomplete FBO bound sends every subsequent draw nowhere,
+    // which turns one rejected resize into a silently blank frame rather than
+    // a diagnosable one.
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &fbo);
+    glDeleteTextures(1, &colorTexture);
+    glDeleteRenderbuffers(1, &depthRbo);
+    return false;
   }
 
+  // Complete: the previous target is now genuinely redundant.
+  destroyOffscreenTarget();
+  m_OffscreenFbo = fbo;
+  m_OffscreenColorTexture = colorTexture;
+  m_OffscreenDepthRbo = depthRbo;
+  m_OffscreenWidth = width;
+  m_OffscreenHeight = height;
+
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  return true;
 }
 
 void OpenGLRenderer::bindOffscreenTarget() {

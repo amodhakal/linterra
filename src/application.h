@@ -23,6 +23,13 @@ class Application {
   void update();
 
  private:
+  // Declared FIRST among the GL-owning members, so it is destroyed LAST --
+  // after m_ChunkManager, m_TextureArray, the shaders and the VAO have all
+  // released their GL objects. That ordering is what keeps every glDelete*
+  // inside those destructors running against a live context (#128).
+  // ~OpenGLRenderer releases the renderer's own objects and then terminates
+  // windowing, so the context cannot be torn down while anything still holds
+  // a GL name.
   std::unique_ptr<IRenderer> m_Renderer;
   Shader m_RenderShader;   // scene pass: textures + lighting, no fog
   Shader m_FogShader;      // post pass: composites fog over the scene

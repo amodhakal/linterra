@@ -79,7 +79,7 @@ class OpenGLRenderer : public IRenderer {
   void bindFramebuffer(std::uint32_t framebufferId) override;
   std::uint32_t getLastError() override;
   void bindTexture2D(std::uint32_t textureId, std::int32_t unit) override;
-  void resizeOffscreenTarget(std::uint32_t width, std::uint32_t height) override;
+  bool resizeOffscreenTarget(std::uint32_t width, std::uint32_t height) override;
   void bindOffscreenTarget() override;
   void bindOffscreenColorTexture(std::int32_t unit) override;
 
@@ -102,6 +102,11 @@ class OpenGLRenderer : public IRenderer {
   CursorPosCallback m_CursorPosCallback = nullptr;
   ScrollCallback m_ScrollCallback = nullptr;
   FramebufferSizeCallback m_FramebufferSizeCallback = nullptr;
+  // A callback registered before GLAD was loaded, armed once it is (#129).
+  FramebufferSizeCallback m_PendingFramebufferSizeCallback = nullptr;
+  bool m_ContextFunctionsLoaded = false;
+  // terminateWindowing() is called both explicitly and from ~OpenGLRenderer.
+  bool m_WindowingTerminated = false;
 
   std::uint32_t m_OffscreenFbo = 0;
   std::uint32_t m_OffscreenColorTexture = 0;

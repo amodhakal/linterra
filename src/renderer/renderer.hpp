@@ -212,7 +212,10 @@ class IRenderer {
   virtual void bindFramebuffer(std::uint32_t framebufferId) = 0;
   virtual std::uint32_t getLastError() = 0;
   virtual void bindTexture2D(std::uint32_t textureId, std::int32_t unit) = 0;
-  virtual void resizeOffscreenTarget(std::uint32_t width,
+  // Returns false if the requested size was rejected. Must not throw: this
+  // is reached from a GLFW C callback via glfwPollEvents, where an escaping
+  // exception is undefined behaviour (#142).
+  virtual bool resizeOffscreenTarget(std::uint32_t width,
                                      std::uint32_t height) = 0;
   virtual void bindOffscreenTarget() = 0;
   virtual void bindOffscreenColorTexture(std::int32_t unit) = 0;
