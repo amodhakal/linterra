@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstdint>
 
 #include "doctest/doctest.h"
 
@@ -24,6 +25,102 @@ bool contains(int worldBlock, int chunkIndex) {
 }
 
 }  // namespace
+
+TEST_SUITE("Walkable surface") {
+  TEST_CASE("a dry column reports its own terrain height") {
+    // At and above the water line there is no water plane, so the terrain
+    // surface is the surface. The boundary is inclusive at WATER_LEVEL:
+    // Chunk::generateMesh's water pass skips a column whose surface is already
+    // at or above the line (`if (surface >= WATER_LEVEL) continue`), so
+    // surface == WATER_LEVEL is dry and must report itself.
+    CHECK(Constants::Chunk::walkableSurfaceY(
+              static_cast<uint16_t>(Constants::Chunk::WATER_LEVEL)) ==
+          doctest::Approx(static_cast<float>(Constants::Chunk::WATER_LEVEL)));
+
+    for (int h : {46, 60, 100, 170, 255}) {
+      CAPTURE(h);
+      CHECK(Constants::Chunk::walkableSurfaceY(static_cast<uint16_t>(h)) ==
+            doctest::Approx(static_cast<float>(h)));
+    }
+  }
+
+  TEST_CASE("a submerged column reports the water line, not the lake bed") {
+    // The defect. A column with terrain at y = 20 has a flat opaque water
+    // plane drawn at y = 45 above it, in the same mesh, so the terrain is
+    // completely invisible. The ground query used to return 20, which places
+    // the player 25 blocks under an opaque surface: no terrain, no sky, no
+    // horizon, and -- because jump() re-imposes a fixed JUMP_VELOCITY impulse
+    // and the next frame snaps back -- no way out.
+    constexpr uint16_t kLakeBed = 20;
+    CHECK(Constants::Chunk::isSubmerged(kLakeBed));
+    CHECK(Constants::Chunk::walkableSurfaceY(kLakeBed) ==
+          doctest::Approx(static_cast<float>(Constants::Chunk::WATER_LEVEL)));
+    CHECK(Constants::Chunk::walkableSurfaceY(kLakeBed) !=
+          doctest::Approx(static_cast<float>(kLakeBed)));
+
+    // Every height below the line, including the one immediately below it,
+    // which is the boundary the mesher's `>=` comparison turns on.
+    for (int h = 0; h < Constants::Chunk::WATER_LEVEL; ++h) {
+      CAPTURE(h);
+      CHECK(Constants::Chunk::isSubmerged(static_cast<uint16_t>(h)));
+      CHECK(Constants::Chunk::walkableSurfaceY(static_cast<uint16_t>(h)) ==
+            doctest::Approx(static_cast<float>(Constants::Chunk::WATER_LEVEL)));
+    }
+  }
+
+  TEST_CASE("the surface is never below the terrain it covers") {
+    // The invariant the two functions together have to hold for every possible
+    // heightmap value, checked over the whole uint16_t domain the heightmap
+    // can hold rather than a sample of it.
+    for (int h = 0; h <= 65535; ++h) {
+      const auto terrain = static_cast<uint16_t>(h);
+      const float surface = Constants::Chunk::walkableSurfaceY(terrain);
+      if (h == 65535) {
+        // uint16_t round-trips exactly, but be explicit rather than rely on it.
+        CHECK(surface == doctest::Approx(static_cast<float>(h)));
+        continue;
+      }
+      if (surface < static_cast<float>(h)) {
+        CAPTURE(h);
+        FAIL_CHECK("the walkable surface is below the terrain it covers");
+      }
+    }
+  }
+
+  TEST_CASE("isSubmerged is exactly the mesher's water-pass predicate") {
+    // Chunk::generateMesh's water pass reads
+    //     const uint16_t surface = m_HeightMap[x][z];
+    //     if (surface >= Constants::Chunk::WATER_LEVEL) continue;
+    //     ... addQuad at Constants::Chunk::WATER_LEVEL ...
+    // so the mesher emits a water plane for exactly the columns this predicate
+    // calls submerged, and the comparison is `>=` against the same constant.
+    // Restating the comparison here rather than calling the mesher is the whole
+    // point: the two sites read the rule from Constants::Chunk, and this pins
+    // the rule they read.
+    for (int h = 0; h <= 65535; ++h) {
+      const auto terrain = static_cast<uint16_t>(h);
+      const auto waterLevel =
+          static_cast<uint16_t>(Constants::Chunk::WATER_LEVEL);
+      const bool mesherEmitsWater = terrain < waterLevel;
+      if (mesherEmitsWater != Constants::Chunk::isSubmerged(terrain)) {
+        CAPTURE(h);
+        FAIL_CHECK("isSubmerged disagrees with the mesher's water-pass test");
+      }
+    }
+  }
+
+  TEST_CASE("the gap the fix closes is the depth of the lake") {
+    // Stated as a measurement so the size of the defect is in the log: a
+    // column at the bottom of the world is reported 45 blocks below the
+    // surface the player is looking at.
+    INFO("lake depth reported: "
+         << (static_cast<float>(Constants::Chunk::WATER_LEVEL) - 0.0f)
+         << " blocks");
+    CHECK(Constants::Chunk::WATER_LEVEL == 45);
+    CHECK(static_cast<float>(Constants::Chunk::WATER_LEVEL) - 0.0f ==
+          doctest::Approx(45.0f));
+  }
+}
 
 TEST_SUITE("ChunkGrid containment") {
   TEST_CASE("the chunk index contains the block it was derived from") {

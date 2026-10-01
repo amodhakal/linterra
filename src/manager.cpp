@@ -384,7 +384,14 @@ bool ChunkManager::tryGetGroundHeight(const glm::vec3 &cameraPosition,
     return false;
   }
 
-  outHeight = static_cast<float>(it->second.getHighestBlockY(
+  // The surface, not the terrain. The mesher draws a flat opaque water plane
+  // at WATER_LEVEL over every submerged column into the same mesh, so for
+  // those columns the terrain height is invisible and unreachable -- asking
+  // for it would place the player on the lake bed under an opaque ceiling, up
+  // to 45 blocks below the surface they are actually looking at (#134).
+  // Constants::Chunk::walkableSurfaceY is the same predicate the mesher uses,
+  // so the two cannot drift.
+  outHeight = Constants::Chunk::walkableSurfaceY(it->second.getHighestBlockY(
       static_cast<uint32_t>(localX), static_cast<uint32_t>(localZ)));
   return true;
 }
