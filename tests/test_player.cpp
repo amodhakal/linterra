@@ -44,12 +44,16 @@ TEST_CASE("Mouse look accumulates yaw and pitch") {
   Player player({0.0f, 0.0f, 0.0f});
   Camera* camera = player.getCamera();
 
+  // The first event only establishes the cursor baseline and is swallowed
+  // (#139), so a real movement needs a priming event first.
+  player.processMouseInput(10.0, 10.0);
+
   const float initialYaw = camera->m_Yaw;
   const float initialPitch = camera->m_Pitch;
 
   // Move the cursor right and up. Yaw follows the cursor; pitch uses the
   // inverted delta, so moving up decreases the stored pitch.
-  player.processMouseInput(100.0, 100.0);
+  player.processMouseInput(110.0, -90.0);
 
   CHECK(camera->m_Yaw != initialYaw);
   CHECK(camera->m_Pitch != initialPitch);
@@ -58,6 +62,9 @@ TEST_CASE("Mouse look accumulates yaw and pitch") {
 TEST_CASE("Mouse look clamps pitch to the configured limits") {
   Player player({0.0f, 0.0f, 0.0f});
   Camera* camera = player.getCamera();
+
+  // Prime the baseline; the first event is swallowed (#139).
+  player.processMouseInput(0.0, 0.0);
 
   // A single huge downward jump must saturate at PITCH_MIN rather than letting
   // the view flip over the poles.
@@ -80,21 +87,52 @@ TEST_CASE("Mouse look keeps the view vector normalised") {
   }
 }
 
-TEST_CASE("Mouse look measures deltas from the previous event") {
-  // The first event must not be treated as a large movement. Camera's
-  // m_LastX/m_LastY start at zero, so the first sample does produce a delta
-  // equal to the absolute position -- which is the snap tracked in #139. Pin
-  // the current behaviour here so the fix is a visible test change.
+TEST_CASE("the first mouse event does not rotate the view") {
+  // Regression test for #139. Camera used to seed m_LastX/m_LastY from the
+  // compile-time SCR_WIDTH/SCR_HEIGHT (400, 300) rather than from a real
+  // cursor position, and Player::processMouseInput never checked the
+  // never-read m_IsFirstMouse flag. The first callback therefore carried a
+  // delta of |xPosition - 400| px, which at SENSITIVITY = 0.2 is an arbitrary
+  // rotation -- 72 degrees of yaw for a cursor at (760, 180) -- on the first
+  // mouse movement after launch.
+  //
+  // The first event carries no relative motion, so it must leave the view
+  // exactly where it was.
   Player player({0.0f, 0.0f, 0.0f});
   Camera* camera = player.getCamera();
 
   const float yawBefore = camera->m_Yaw;
+  const float pitchBefore = camera->m_Pitch;
+  const glm::vec3 frontBefore = camera->m_Front;
+
+  // A cursor position far from the old hard-coded (400, 300) seed: the case
+  // that produced the largest spurious rotation.
+  player.processMouseInput(760.0, 180.0);
+
+  CHECK(camera->m_Yaw == doctest::Approx(yawBefore));
+  CHECK(camera->m_Pitch == doctest::Approx(pitchBefore));
+  CHECK(camera->m_Front == frontBefore);
+}
+
+TEST_CASE("the second mouse event is measured from the first") {
+  // The counterpart to the case above: swallowing the first event is only
+  // correct if the baseline is taken from it. A second event at the same
+  // position must therefore produce no rotation, and an event N pixels away
+  // must produce exactly N * SENSITIVITY of yaw.
+  Player player({0.0f, 0.0f, 0.0f});
+  Camera* camera = player.getCamera();
+
   player.processMouseInput(500.0, 500.0);
   const float yawAfterFirst = camera->m_Yaw;
-  CHECK(yawAfterFirst != yawBefore);
 
-  // The very next event at the same coordinates must produce no rotation at
-  // all, which is the part that is correct today.
+  // The very next event at the same coordinates must produce no rotation.
   player.processMouseInput(500.0, 500.0);
-  CHECK(camera->m_Yaw == yawAfterFirst);
+  CHECK(camera->m_Yaw == doctest::Approx(yawAfterFirst));
+
+  // 100 px right at SENSITIVITY = 0.2 is +20 degrees of yaw, measured from
+  // 500 -- not from 400, which is what the old seed would have produced.
+  player.processMouseInput(600.0, 500.0);
+  CHECK(
+      camera->m_Yaw ==
+      doctest::Approx(yawAfterFirst + 100.0f * Constants::Camera::SENSITIVITY));
 }

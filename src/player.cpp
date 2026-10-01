@@ -83,11 +83,22 @@ void Player::processKeyInput(IRenderer& renderer, float deltaTime) {
 }
 
 void Player::processMouseInput(double xPosition, double yPosition) {
-  float xOffset = static_cast<float>(xPosition - m_Camera.m_LastX);
-  float yOffset = static_cast<float>(m_Camera.m_LastY - yPosition);
+  // The first event after the cursor is grabbed carries no relative motion at
+  // all: it just reports where the platform says the pointer is. It exists only
+  // to establish the baseline, so it is swallowed rather than integrated --
+  // otherwise the view snaps by however far the pointer was from the centre of
+  // the window, tens of degrees at SENSITIVITY = 0.2 (#139).
+  const glm::vec2 cursor{static_cast<float>(xPosition),
+                         static_cast<float>(yPosition)};
+  if (!m_Camera.m_LastCursorPos.has_value()) {
+    m_Camera.m_LastCursorPos = cursor;
+    return;
+  }
 
-  m_Camera.m_LastX = xPosition;
-  m_Camera.m_LastY = yPosition;
+  float xOffset = cursor.x - m_Camera.m_LastCursorPos->x;
+  float yOffset = m_Camera.m_LastCursorPos->y - cursor.y;
+
+  m_Camera.m_LastCursorPos = cursor;
 
   xOffset *= Constants::Camera::SENSITIVITY;
   yOffset *= Constants::Camera::SENSITIVITY;
