@@ -246,7 +246,7 @@ void Application::update() {
 }
 
 float Application::getDeltaTime() {
-  float currentFrame = m_Renderer->getTimeSeconds();
+  const double currentFrame = m_Renderer->getTimeSeconds();
   if (m_FirstFrame) {
     // The clock has been running since renderer init, so the raw delta on the
     // first frame is huge and would teleport the player. Treat the first
@@ -255,10 +255,14 @@ float Application::getDeltaTime() {
     m_LastFrame = currentFrame;
     return 0.0f;
   }
-  float deltaTime = currentFrame - m_LastFrame;
+  // The first-frame guard above handles frame 0 and nothing else. Every
+  // subsequent stall is just as unbounded -- see FrameTime::clampDeltaSeconds
+  // for the derivation of the 28.7-block figure (#145).
+  const double deltaTime =
+      FrameTime::clampDeltaSeconds(currentFrame - m_LastFrame);
   m_LastFrame = currentFrame;
 
-  return deltaTime;
+  return static_cast<float>(deltaTime);
 }
 
 void Application::processMouseInput(double xPosition, double yPosition) {

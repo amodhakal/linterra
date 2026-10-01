@@ -200,6 +200,7 @@ if(BUILD_TESTS)
     tests/test_shader_uniforms.cpp
     tests/test_threadpool.cpp
     tests/test_texture.cpp
+    tests/test_frametime.cpp
     vendor/noise/src/noise.cpp
   )
 

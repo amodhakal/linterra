@@ -350,8 +350,8 @@ void OpenGLRenderer::pollEvents() {
   glfwPollEvents();
 }
 
-float OpenGLRenderer::getTimeSeconds() {
-  return static_cast<float>(glfwGetTime());
+double OpenGLRenderer::getTimeSeconds() {
+  return glfwGetTime();
 }
 
 bool OpenGLRenderer::isKeyPressed(Key key) {

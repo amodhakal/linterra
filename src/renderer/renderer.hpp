@@ -204,7 +204,11 @@ class IRenderer {
   virtual bool windowShouldClose() = 0;
   virtual void swapBuffers() = 0;
   virtual void pollEvents() = 0;
-  virtual float getTimeSeconds() = 0;
+  // double, not float: glfwGetTime's resolution is lost the moment the
+  // value is narrowed, which quantises consecutive frame samples onto the
+  // same float and injects ~1 ms jitter spikes that nothing on the CPU
+  // caused (#145).
+  virtual double getTimeSeconds() = 0;
   virtual bool isKeyPressed(Key key) = 0;
   virtual void setWindowShouldClose(bool shouldClose) = 0;
   virtual void* getNativeWindow() = 0;
