@@ -8,23 +8,32 @@
 #include <print>
 
 #include <glm/glm.hpp>
-
 #include "chunk.h"
+#include "chunk_coords.h"
 #include "config.h"
 #include "frustum.h"
 #include "renderer/renderer.hpp"
+#include "shader.h"
 
 namespace {
 
 constexpr float kChunkBlockExtent =
     static_cast<float>(Constants::Chunk::LENGTH);
+// The chunk *centre* is at pos*L + L/2, because chunk meshes are drawn with
+// vertices in [pos*L, pos*L+L] (see ChunkManager::render's model translation
+// and chunk.cpp's local block coords).
+//
+// That half-chunk bias belongs HERE and only here, because only here is a
+// centre what is wanted -- the distance is compared against
+// RENDER_DISTANCE_BLOCKS. It is not what a containment test wants: a block
+// coordinate resolves to floor(w / L), with no bias at all, or the back half of
+// every chunk resolves to the *next* chunk (#132). ChunkGrid::chunkIndexFor
+// states that, and both call sites now go through it.
 constexpr float kChunkCenterOffset = kChunkBlockExtent * 0.5f;
-// Chunk meshes are drawn with vertices in [pos*L, pos*L+L] (see
-// ChunkManager::render's model translation and chunk.cpp's local block coords),
-// so the true chunk center is pos*L + L/2, not pos*L - L/2.
 
 
-} // namespace
+}  // namespace
+
 
 ChunkManager::ChunkManager(IRenderer* renderer)
     : m_Renderer(renderer), m_ComputeShader(renderer) {}
@@ -206,10 +215,10 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     m_ProcessedChunks.try_emplace(position, std::move(promoted));
   }
 
-  const int32_t currentChunkX = static_cast<int32_t>(
-      std::floor((cameraPosition.x + kChunkCenterOffset) / kChunkBlockExtent));
-  const int32_t currentChunkZ = static_cast<int32_t>(
-      std::floor((cameraPosition.z + kChunkCenterOffset) / kChunkBlockExtent));
+  // Streaming window origin. The chunk the camera is *inside*, which is an
+  // index of containment and takes no half-chunk bias (#132).
+  const int32_t currentChunkX = ChunkGrid::chunkIndexFor(cameraPosition.x);
+  const int32_t currentChunkZ = ChunkGrid::chunkIndexFor(cameraPosition.z);
 
   for (int32_t chunkX = currentChunkX - Constants::Chunk::RENDER_DISTANCE_CHUNKS;
        chunkX <= currentChunkX + Constants::Chunk::RENDER_DISTANCE_CHUNKS;
@@ -342,24 +351,27 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
 }
 
 float ChunkManager::getPositionHighestY(const glm::vec3 &cameraPosition) {
-  const int32_t chunkX = static_cast<int32_t>(
-      std::floor((cameraPosition.x + kChunkCenterOffset) / kChunkBlockExtent));
-  const int32_t chunkZ = static_cast<int32_t>(
-      std::floor((cameraPosition.z + kChunkCenterOffset) / kChunkBlockExtent));
+  // Containment, so no bias: floor(w / L), which is the chunk that actually
+  // contains world block w (#132).
+  const int32_t chunkX = ChunkGrid::chunkIndexFor(cameraPosition.x);
+  const int32_t chunkZ = ChunkGrid::chunkIndexFor(cameraPosition.z);
 
-  const glm::ivec2 chunkPosition = {static_cast<float>(chunkX),
-                                   static_cast<float>(chunkZ)};
+  const glm::ivec2 chunkPosition{chunkX, chunkZ};
 
   const int32_t worldX = static_cast<int32_t>(std::floor(cameraPosition.x));
   const int32_t worldZ = static_cast<int32_t>(std::floor(cameraPosition.z));
 
-  int32_t localX = worldX - (chunkX * Constants::Chunk::LENGTH);
-  int32_t localZ = worldZ - (chunkZ * Constants::Chunk::LENGTH);
+  const int32_t localX = worldX - (chunkX * Constants::Chunk::LENGTH);
+  const int32_t localZ = worldZ - (chunkZ * Constants::Chunk::LENGTH);
 
-  localX =
-      std::clamp(localX, 0, static_cast<int32_t>(Constants::Chunk::LENGTH - 1));
-  localZ =
-      std::clamp(localZ, 0, static_cast<int32_t>(Constants::Chunk::LENGTH - 1));
+  // In [0, L) by construction, so there is nothing to clamp. The clamp that
+  // used to be here is what made the off-by-half-chunk bug invisible: it
+  // turned a -6 into a 0, so the query quietly returned the neighbouring
+  // chunk's first column -- up to 15 blocks away -- with nothing reporting
+  // it. Asserted instead, so a regression is a loud failure rather than a
+  // plausible-looking number (#132).
+  assert(localX >= 0 && localX < Constants::Chunk::LENGTH);
+  assert(localZ >= 0 && localZ < Constants::Chunk::LENGTH);
 
   if (m_ProcessedChunks.contains(chunkPosition)) {
     Chunk &chunk = m_ProcessedChunks.at(chunkPosition);

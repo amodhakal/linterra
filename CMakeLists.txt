@@ -201,6 +201,7 @@ if(BUILD_TESTS)
     tests/test_threadpool.cpp
     tests/test_texture.cpp
     tests/test_frametime.cpp
+    tests/test_ground_query.cpp
     vendor/noise/src/noise.cpp
   )
 
