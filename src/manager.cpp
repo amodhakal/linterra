@@ -350,7 +350,8 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
   }
 }
 
-float ChunkManager::getPositionHighestY(const glm::vec3 &cameraPosition) {
+bool ChunkManager::tryGetGroundHeight(const glm::vec3 &cameraPosition,
+                                      float &outHeight) const {
   // Containment, so no bias: floor(w / L), which is the chunk that actually
   // contains world block w (#132).
   const int32_t chunkX = ChunkGrid::chunkIndexFor(cameraPosition.x);
@@ -373,11 +374,17 @@ float ChunkManager::getPositionHighestY(const glm::vec3 &cameraPosition) {
   assert(localX >= 0 && localX < Constants::Chunk::LENGTH);
   assert(localZ >= 0 && localZ < Constants::Chunk::LENGTH);
 
-  if (m_ProcessedChunks.contains(chunkPosition)) {
-    Chunk &chunk = m_ProcessedChunks.at(chunkPosition);
-    return static_cast<float>(chunk.getHighestBlockY(
-        static_cast<uint32_t>(localX), static_cast<uint32_t>(localZ)));
+  // One lookup rather than contains() followed by at(), which hashes and
+  // probes twice to reach the same entry.
+  const auto it = m_ProcessedChunks.find(chunkPosition);
+  if (it == m_ProcessedChunks.end()) {
+    // Not yet streamed in. Report nothing rather than a height: the player
+    // should keep falling until the chunk arrives, not be placed on a floor
+    // that is not there (#133). outHeight is deliberately left untouched.
+    return false;
   }
 
-  return static_cast<float>(Constants::Chunk::HEIGHT);
+  outHeight = static_cast<float>(it->second.getHighestBlockY(
+      static_cast<uint32_t>(localX), static_cast<uint32_t>(localZ)));
+  return true;
 }

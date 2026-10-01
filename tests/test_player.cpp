@@ -1,4 +1,5 @@
 #include <cmath>
+#include <type_traits>
 
 #include "config.h"
 #include "doctest/doctest.h"
@@ -27,10 +28,38 @@ TEST_CASE("Player places its camera at the requested position") {
 TEST_CASE("Player starts at rest") {
   Player player({0.0f, 0.0f, 0.0f});
 
-  // With DO_GRAVITY off, no velocity accumulates and update() is a no-op.
+  // With DO_GRAVITY off, no velocity accumulates and update() is a no-op
+  // whether or not there is ground under the player.
   const glm::vec3 before = player.getCamera()->m_Position;
-  player.update(0.016f, 0);
+  player.update(0.016f, /*hasGround=*/true, /*groundY=*/0.0f);
   CHECK(player.getCamera()->m_Position == before);
+}
+
+TEST_CASE("Player is told whether there is ground, not handed a height") {
+  // The defect this signature exists to remove (#133): the ground query
+  // answered Chunk::HEIGHT (256) for a chunk that had not streamed in, which
+  // is a height, so "no ground" and "the ground is at the world ceiling" were
+  // the same value and Player::update snapped the player up to 258 with
+  // nothing to fall onto.
+  //
+  // This is a compile-time assertion rather than a behavioural one, and it is
+  // worth being precise about what it does and does not buy: it fails to build
+  // if update() goes back to taking a bare height, so the absence of ground
+  // stays representable at the call site. It cannot check the behaviour,
+  // because every branch in update() is gated on Constants::DO_GRAVITY, which
+  // is a compile-time false. A behavioural test arrives with the physics
+  // helpers, where it can drive them directly without flipping the global.
+  static_assert(std::is_same_v<decltype(&Player::update),
+                               void (Player::*)(float, bool, float)>);
+
+  // The flag is not decoration: with no ground the call is well-formed and the
+  // player is left alone rather than snapped to a floor that is not there.
+  Player player({0.0f, 155.0f, 0.0f});
+  const glm::vec3 before = player.getCamera()->m_Position;
+  player.update(0.016f, /*hasGround=*/false,
+                /*groundY=*/static_cast<float>(Constants::Chunk::HEIGHT));
+  CHECK(player.getCamera()->m_Position == before);
+  CHECK(true);
 }
 
 TEST_CASE("Player forwards view and projection from its camera") {

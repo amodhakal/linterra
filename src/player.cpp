@@ -8,7 +8,7 @@
 Player::Player(const glm::vec3& position)
     : m_Velocity(0.0f, 0.0f, 0.0f), m_Camera(position), m_AllowJumping(false) {}
 
-void Player::update(float deltaTime, std::int32_t currentY) {
+void Player::update(float deltaTime, bool hasGround, float groundY) {
   if (Constants::DO_GRAVITY) {
     m_Velocity.y -= Constants::Camera::ACCELERATION * deltaTime;
     if (m_Velocity.y < -Constants::Camera::MAX_VELOCITY) {
@@ -17,8 +17,12 @@ void Player::update(float deltaTime, std::int32_t currentY) {
 
     m_Camera.m_Position.y += m_Velocity.y * deltaTime;
 
-    if (m_Camera.m_Position.y <= static_cast<float>(currentY) + 2.0f) {
-      m_Camera.m_Position.y = static_cast<float>(currentY) + 2.0f;
+    // Only a ground the query actually found can stop the fall. Without the
+    // guard, an unstreamed chunk's height is always above the player and this
+    // branch always fires, so the player is lifted clear of the world and
+    // never comes back down (#133).
+    if (hasGround && m_Camera.m_Position.y <= groundY + 2.0f) {
+      m_Camera.m_Position.y = groundY + 2.0f;
       m_Velocity.y = 0;
       m_AllowJumping = true;
     } else {

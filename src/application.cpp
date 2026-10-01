@@ -240,9 +240,16 @@ void Application::update() {
     std::println("OpenGL Error: {} ({:#06x})", describeGlError(err), err);
   }
 
+  // The ground may genuinely not be known yet -- the player's own chunk is
+  // requested this frame and is not guaranteed to have been meshed, promoted
+  // and uploaded before the query runs. hasGround carries that, so an absent
+  // chunk means "keep falling" rather than "the ground is at the world
+  // ceiling" (#133).
   glm::vec3 cameraPosition = m_Player.getCamera()->m_Position;
-  float highestY = m_ChunkManager.getPositionHighestY(cameraPosition);
-  m_Player.update(deltaTime, highestY);
+  float groundY = 0.0f;
+  const bool hasGround =
+      m_ChunkManager.tryGetGroundHeight(cameraPosition, groundY);
+  m_Player.update(deltaTime, hasGround, groundY);
 }
 
 float Application::getDeltaTime() {

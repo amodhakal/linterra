@@ -10,7 +10,17 @@
 class Player {
  public:
   Player(const glm::vec3& position);
-  void update(float deltaTime, std::int32_t currentY);
+
+  // Advance one step.
+  //
+  // `hasGround` is false when the chunk under the player has not streamed in
+  // yet. It has to be a separate signal rather than a magic height: the
+  // ground query used to answer Chunk::HEIGHT (256) for a missing chunk, which
+  // is above the player, so the contact test below always passed and the
+  // player was snapped *up* to 258 with nothing to fall onto (#133). With the
+  // flag, a missing chunk means "keep falling", and the situation resolves
+  // itself as soon as the chunk arrives.
+  void update(float deltaTime, bool hasGround, float groundY);
   void jump(float cameraSpeed);
 
   Camera* getCamera();
