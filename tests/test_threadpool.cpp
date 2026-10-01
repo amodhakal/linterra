@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <stdexcept>
 #include <thread>
 
 #include "doctest/doctest.h"
@@ -205,4 +206,83 @@ TEST_CASE("ThreadPool runs every task exactly once") {
     MESSAGE("all " << kTasks << " tasks ran on "
                    << state->ids.size() << " thread(s); not asserted on");
   }
+}
+
+TEST_CASE("ThreadPool survives a task that throws") {
+  // An exception escaping a worker took the whole process down.
+  // std::terminate fires the moment one propagates out of a thread's entry
+  // function, because there is no handler between task() and the thread
+  // boundary -- so a single std::bad_alloc from the mesher's push_back growth
+  // aborted the process mid-frame with "terminate called after throwing an
+  // instance of 'std::bad_alloc'" and SIGABRT. That is indistinguishable from
+  // any other crash, and it loses all 4224 chunks that were fine.
+  //
+  // The correct outcome is to lose one task and keep going.
+  //
+  // If this regresses the test binary aborts rather than failing, which is
+  // exactly the behaviour under test.
+  auto state = std::make_shared<std::atomic<int>>(0);
+  auto laterRan = std::make_shared<std::atomic<bool>>(false);
+
+  {
+    ThreadPool pool;
+    // std::runtime_error rather than std::bad_alloc: the point is that an
+    // exception must not escape, not which exception type.
+    REQUIRE(pool.tryEnqueue(
+        [] { throw std::runtime_error("deliberate test failure"); }, 8));
+
+    // A second task must still run. Without the guard the process is already
+    // gone by this point, so this is the assertion that distinguishes
+    // "caught" from "ignored and continued" in the wrong order.
+    for (int i = 0; i < 64; ++i) {
+      pool.tryEnqueue(
+          [state] { state->fetch_add(1, std::memory_order_release); }, 128);
+    }
+    REQUIRE(WaitUntil([state] {
+      return state->load(std::memory_order_acquire) == 64;
+    }));
+
+    pool.tryEnqueue([laterRan] { laterRan->store(true); }, 8);
+    REQUIRE(WaitUntil([laterRan] { return laterRan->load(); }));
+  }
+
+  CHECK(laterRan->load());
+}
+
+TEST_CASE("ThreadPool survives a task that throws a non-std exception") {
+  // The catch(...) arm. A task throwing something that is not a
+  // std::exception -- std::bad_alloc is one, but so is anything a future
+  // mesher might raise -- must not terminate the process either.
+  auto laterRan = std::make_shared<std::atomic<bool>>(false);
+
+  {
+    ThreadPool pool;
+    REQUIRE(pool.tryEnqueue([] { throw 42; }, 8));
+    pool.tryEnqueue([laterRan] { laterRan->store(true); }, 8);
+    REQUIRE(WaitUntil([laterRan] { return laterRan->load(); }));
+  }
+
+  CHECK(laterRan->load());
+}
+
+TEST_CASE("ThreadPool keeps running after many throwing tasks") {
+  // The realistic shape: a run of bad allocations across several workers,
+  // interleaved with good work. Losing the pool to the first one would leave
+  // every remaining chunk unmeshed.
+  auto good = std::make_shared<std::atomic<int>>(0);
+
+  {
+    ThreadPool pool;
+    for (int i = 0; i < 100; ++i) {
+      pool.tryEnqueue(
+          [] { throw std::runtime_error("deliberate test failure"); }, 256);
+    }
+    for (int i = 0; i < 100; ++i) {
+      pool.tryEnqueue(
+          [good] { good->fetch_add(1, std::memory_order_release); }, 256);
+    }
+    REQUIRE(WaitUntil([good] { return good->load(std::memory_order_acquire) == 100; }));
+  }
+
+  CHECK(good->load() == 100);
 }

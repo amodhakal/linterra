@@ -22,6 +22,12 @@ struct TaskResult {
   Chunk chunk;
   std::atomic<bool> meshReady{false};
   std::atomic<bool> uploadReady{false};
+  // Set when a worker task threw. Without it the promotion loop waits on
+  // uploadReady forever: the chunk's position stays in m_ProcessingPositions
+  // and its TaskResult stays in m_ProcessingChunks, so the position is never
+  // released and the chunk is never re-queued -- exactly the stranded-position
+  // failure the enqueue-failure path goes to such lengths to avoid (#141).
+  std::atomic<bool> failed{false};
   // The SSBO slot this chunk's heightmap was dispatched into, or kNoGpuSlot
   // if it took the CPU path. Tracked so the slot is returned to the free list
   // exactly once -- on readback, and on the discard path too, where the chunk
@@ -37,6 +43,7 @@ struct TaskResult {
         meshReady(other.meshReady.load(std::memory_order_relaxed)),
         uploadReady(
             other.uploadReady.load(std::memory_order_relaxed)),
+        failed(other.failed.load(std::memory_order_relaxed)),
         slot(other.slot) {}
 
   TaskResult &operator=(TaskResult &&other) noexcept {
@@ -48,6 +55,8 @@ struct TaskResult {
       uploadReady.store(
           other.uploadReady.load(std::memory_order_relaxed),
           std::memory_order_relaxed);
+      failed.store(other.failed.load(std::memory_order_relaxed),
+                   std::memory_order_relaxed);
       slot = other.slot;
     }
     return *this;

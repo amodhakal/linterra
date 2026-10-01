@@ -188,6 +188,32 @@ void Chunk::generateMesh() {
   m_Data.clear();
   m_Indices.clear();
 
+  // Reserve up front so the inner push_back loops cannot reallocate
+  // mid-mesh. A reallocation there is where std::bad_alloc comes from, and
+  // the mesher runs on a worker thread where an escaping exception used to
+  // take the whole process down (#141).
+  //
+  // The absolute worst case is BX*BZ*BY quads (every column exposed at every
+  // Y level), which for 16x16x256 is 65536 quads -- 3.7 MB of vertex and index
+  // storage per chunk, times up to 4225 resident chunks. Reserving that is
+  // far worse than the reallocations it avoids.
+  //
+  // What is actually emitted is the *surface* of the terrain: one top quad
+  // per column, one bottom quad per column, and side quads down the height
+  // differences between neighbouring columns. For a heightmap-driven world
+  // that is bounded by a small multiple of the column count plus the column
+  // heights, not by the volume, so reserve from that instead. Over-reserving
+  // costs one allocation of capacity; under-reserving costs a geometric
+  // reallocation, which is the thing being avoided.
+  const size_t columns = static_cast<size_t>(BX) * static_cast<size_t>(BZ);
+  // Top + bottom per column, plus a margin for side faces on uneven terrain,
+  // plus a floor so a flat world does not reserve almost nothing and then
+  // grow anyway.
+  constexpr size_t kQuadsPerColumn = 8;
+  const size_t reserveQuads = columns * kQuadsPerColumn + columns;
+  m_Data.reserve(reserveQuads * 4);
+  m_Indices.reserve(reserveQuads * 6);
+
   // NOTE: `n` is accepted but ignored, so every face of a block currently
   // resolves to the same texture layer. Making this honor BlockNormal is
   // tracked in #60 (M14) and is deliberately not fixed here.

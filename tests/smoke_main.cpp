@@ -399,6 +399,30 @@ int main() {
       chunk.generateHeightMapCPU(position);
       Report("chunk heightmap (CPU)", true);
 
+      // The mesher reserves its vertex and index storage up front, so the
+      // inner push_back loops cannot reallocate mid-mesh -- a reallocation
+      // there is where std::bad_alloc comes from, on a worker thread where an
+      // escaping exception used to abort the process (#141).
+      //
+      // This reports how the reservation actually compares to what was
+      // emitted, because an over-tight bound would trade a crash for a
+      // reallocation-per-chunk and an over-loose one would reserve hundreds
+      // of MB across 4225 resident chunks. Measured rather than assumed.
+      chunk.generateMesh();
+      const std::size_t verts = chunk.getVertexCount();
+      const std::size_t indices = chunk.getIndexCount();
+      Report("meshing a chunk produces vertices and indices",
+             verts > 0 && indices > 0 && indices % 6 == 0,
+             "verts=" + std::to_string(verts) +
+                 " indices=" + std::to_string(indices));
+      // One quad is 4 vertices and 6 indices, so these must agree. A mismatch
+      // would mean an index was emitted without its corners, which is the
+      // kind of corruption a mid-mesh reallocation would cause.
+      Report("vertex and index counts are consistent for whole quads",
+             verts == (indices / 6) * 4,
+             "verts=" + std::to_string(verts) +
+                 " indices=" + std::to_string(indices));
+
       chunk.generateMeshData(position);
       chunk.generateMesh();
       ReportGlErrors("chunk mesh generation is error-free");
