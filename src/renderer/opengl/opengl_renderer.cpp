@@ -223,9 +223,90 @@ void OpenGLRenderer::activeTexture(int unit) {
   glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(unit));
 }
 
+namespace {
+
+// GLFW reports the reason for every failure through this callback, and nobody
+// installed one -- so glfwCreateWindow returning nullptr, the normal outcome
+// on a machine with no GPU or a driver capped below 3.3 core, produced a bare
+// "Failed to create window" that pointed at the window title rather than at
+// the driver (#148).
+void glfwErrorCallback(int error, const char* description) {
+  std::fprintf(stderr, "GLFW error %d: %s\n", error,
+               description != nullptr ? description : "(no description)");
+}
+
+// GL_DEBUG_OUTPUT, so a driver-side error names the call that raised it
+// instead of arriving anonymously at the end of the frame.
+//
+// This is what the issue is really about. glGetError() pops one flag from a
+// queue and carries no call-site information, and the once-per-frame drain
+// runs ~30 lines after the call that raised the error -- after the scene, fog
+// and ImGui passes, all of which produce byte-identical output. Worse, GL
+// queues one flag per raised error: a frame raising more than the drain's
+// 16-error cap leaves the remainder queued, so the *next* frame's drain
+// prints errors raised by the *previous* frame's calls. The printed error
+// provably describes code that did not run in the frame being reported.
+//
+// A debug output callback reports at the call site, in order, with the
+// message text the driver supplies -- so a missing uniform that raises
+// GL_INVALID_VALUE thousands of times per frame is reported at the
+// setUniform call rather than as 16 identical lines from the wrong point in
+// time.
+void glDebugCallback(GLenum source, GLenum type, GLuint id, GLenum severity,
+                     GLsizei /*length*/, const GLchar* message,
+                     const void* /*userParam*/) {
+  // GL_DEBUG_TYPE_OTHER with GL_SEVERITY_NOTIFICATION is the low-value
+  // majority on several drivers (buffer hints, shader recompiles). They are
+  // not errors and drown the ones that are.
+  if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) {
+    return;
+  }
+  const char* severityName = "UNKNOWN";
+  switch (severity) {
+    case GL_DEBUG_SEVERITY_HIGH:
+      severityName = "HIGH";
+      break;
+    case GL_DEBUG_SEVERITY_MEDIUM:
+      severityName = "MEDIUM";
+      break;
+    case GL_DEBUG_SEVERITY_LOW:
+      severityName = "LOW";
+      break;
+    default:
+      break;
+  }
+  const char* sourceName = "OTHER";
+  switch (source) {
+    case GL_DEBUG_SOURCE_API:
+      sourceName = "API";
+      break;
+    case GL_DEBUG_SOURCE_WINDOW_SYSTEM:
+      sourceName = "WINDOW_SYSTEM";
+      break;
+    case GL_DEBUG_SOURCE_SHADER_COMPILER:
+      sourceName = "SHADER_COMPILER";
+      break;
+    case GL_DEBUG_SOURCE_THIRD_PARTY:
+      sourceName = "THIRD_PARTY";
+      break;
+    default:
+      break;
+  }
+  std::fprintf(stderr, "GL [%s/%s] 0x%04x: %s\n", severityName, sourceName, id,
+               message != nullptr ? message : "(no message)");
+}
+
+}  // namespace
+
 void OpenGLRenderer::initializeWindowing() {
+  // Before glfwInit, so an init failure is reported too.
+  glfwSetErrorCallback(&glfwErrorCallback);
   if (glfwInit() == GLFW_FALSE) {
-    throw std::runtime_error("Failed to initialize GLFW");
+    const char* description = nullptr;
+    glfwGetError(&description);
+    throw std::runtime_error(std::string("Failed to initialize GLFW: ") +
+                             (description != nullptr ? description
+                                                    : "unknown error"));
   }
 }
 
@@ -252,6 +333,11 @@ void OpenGLRenderer::configureWindowHints() {
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, kContextMajor);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+  // GL_DEBUG_OUTPUT needs a debug context. Requesting it unconditionally
+  // rather than only in a debug build: the whole point is that GL errors are
+  // currently unattributable, and that is precisely when you cannot afford to
+  // be hunting them (#148).
+  glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GLFW_TRUE);
 
 #if defined(__APPLE__)
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
@@ -324,6 +410,26 @@ bool OpenGLRenderer::loadContextFunctions() {
     return false;
   }
   m_ContextFunctionsLoaded = true;
+
+  // Turn on driver-side error reporting now that the entry points exist.
+  // Guarded on the pointers: GLAD resolves GL 4.3+ entry points as function
+  // pointers, and a context below that leaves them null -- calling one is a
+  // jump to address 0. This is the same trap as glMemoryBarrier in #151, and
+  // the same reasoning applies: guard the pointer, not the version number.
+  if (glad_glDebugMessageCallback != nullptr) {
+    glEnable(GL_DEBUG_OUTPUT);
+    // Synchronous, so the message is emitted on the thread that made the
+    // call. Without it the driver may queue the message and emit it later,
+    // from another thread, which reintroduces exactly the misattribution
+    // this is meant to remove.
+    glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+    glDebugMessageCallback(&glDebugCallback, nullptr);
+    if (glad_glDebugMessageControl != nullptr) {
+      // All sources, all types, all severities enabled.
+      glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0,
+                            nullptr, GL_TRUE);
+    }
+  }
 
   // Arm anything that was registered before the entry points existed.
   if (m_PendingFramebufferSizeCallback != nullptr) {
