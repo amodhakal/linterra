@@ -176,13 +176,13 @@ The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
 
 ## Roadmap
 
-Milestones 1–11 and M18 are shipped (see [Implemented Features](#implemented-features) below). M12–M17 and M19 are the planned sequence, and they are strictly ordered — each gates the next. M18 is independent of engine behaviour and was worked in parallel with M10.
+Milestones 1–12 and M18 are shipped (see [Implemented Features](#implemented-features) below). M13–M17 and M19 are the planned sequence, and they are strictly ordered — each gates the next. M18 is independent of engine behaviour and was worked in parallel with M10.
 
 | Milestone | Title | Issues | Scope |
 | --- | --- | --- | --- |
 | ~~M10~~ | Build, CI & Safety Net | — | Shipped: headless smoke tests, game in CI, ASan/UBSan, shader validation, macOS runner |
 | ~~M11~~ | Render Correctness: GPU Terrain & Culling | — | Shipped: uniform registration, SSBO slot lifetime, detectable readback failure, frustum & winding |
-| M12 | Resource Lifetime, Shutdown & Error Reporting | 12 | Shutdown order, GL error attribution |
+| ~~M12~~ | Resource Lifetime, Shutdown & Error Reporting | — | Shipped: shutdown ordering, worker exception isolation, GL error attribution, reload state |
 | M13 | Threading, Chunk Pipeline & Player Physics | 11 | Physics query, race windows |
 | M14 | Renderer Abstraction & Backend Portability | 9 | Split `IRenderer`, Metal/Vulkan |
 | M15 | Streaming & Draw-Path Performance | 10 | Draw-call sorting, greedy meshing |
@@ -196,6 +196,29 @@ Full dependency graph and issue lists: [docs/roadmap.md](docs/roadmap.md).
 ---
 
 ## Implemented Features
+
+### Milestone 12 — Resource Lifetime, Shutdown & Error Reporting
+
+This milestone makes resource ownership well-defined and failures diagnosable. The theme that emerged is narrower and more specific than the roadmap predicted: **four separate issues were the same defect — code that treated a *refusal* as *success*.** Every GL object was deleted after the context that owned it had gone; an exception from a worker took the whole process down instead of one chunk; `resizeOffscreenTarget` refused a 0x0 allocation and the caller rendered into framebuffer 0 anyway; `getBufferSubData` failed and the caller consumed the untouched buffer as terrain.
+
+**Shutdown ordering.** `~Application` ended with an explicit `terminateWindowing()`. A destructor *body* runs before any member is destroyed, so the GL context was torn down while every GL-owning member was still alive — `~ChunkManager` deleted a VBO/EBO/VAO for each of up to ~3200 chunks, `~TextureArray` deleted textures, `~Shader` deleted programs, all with no current context and GLAD's pointers aimed at an unloaded driver image. Windowing teardown now lives inside `~OpenGLRenderer`, right after it releases its own objects, because **a renderer that owns GL objects owns the context they live in**. Making that structural rather than conventional is the point: no caller can get the order wrong.
+
+**ThreadPool.** Two fixes, and the first would have turned a crash into a hang without the second. An exception escaping a worker called `std::terminate`; the realistic cause is `std::bad_alloc` from the mesher's `push_back` growth, with no OOM handling anywhere in the engine and a stated 1.5 GB resident at high render distance. Catching it alone would have stranded the chunk forever, because promotion gates on `uploadReady` — so a `failed` flag now lets the promotion loop reap it. Separately, shutdown **discards** the backlog rather than draining it: pressing Escape used to hang the process at 100% CPU with no window, meshing up to 1024 chunks that nothing would ever upload or draw.
+
+**Diagnostics.** There was no `glfwSetErrorCallback`, no `GL_DEBUG_OUTPUT`, and no debug callback anywhere outside `vendor/`. The only error handling was a once-per-frame drain at the end of `update()`, which made three things wrong at once: errors carried no call-site information; the drain ran ~30 lines after the call, after three passes producing byte-identical output; and the 16-error cap left overflow queued, so **the next frame's drain printed errors raised by the previous frame's calls**. `GLFW_VERSION_UNAVAILABLE` was being reported as "Failed to create window", pointing at the window title rather than the driver.
+
+**Reload & move semantics.** `Shader::load`/`loadCompute` replaced the program object while leaving the location cache intact, so every setter passed an integer referring to a slot in a program that no longer existed. A moved-from `OpenGLShader` reported `isCompiled() == true` with `getId() == 0` — the one flag callers gate on was stale, the one GL acts on had been reset.
+
+**Three defects found that the milestone did not plan for**, all preconditions of the planned fixes:
+- **`glMemoryBarrier` is a null GLAD function pointer on macOS** — a latent crash, surfaced when #151 moved the barrier to the read site, which is where the plan wanted it. Removing the guard makes the smoke test segfault immediately (`EXIT=139`).
+- **The storage buffer had no allocation at all.** `convertBufferUsage` returned `GL_*_DRAW` for every buffer type, which is `GL_INVALID_ENUM` for `GL_SHADER_STORAGE_BUFFER`.
+- **`terminateWindowing` could be called twice** once the destructor took ownership of it.
+
+**Two planned items were latent rather than live**, which changes what the milestone bought: the shader reload path has no caller (the constructor loads each shader once), and nothing inspects a stage after moving it. Both are real fixes for what a hot-reload or context-recreate feature *would* hit, but neither is currently reachable.
+
+**The texture path.** `stbi_load` opens with a plain `fopen`, so textures resolved against the working directory with no fallback while shaders got the executable-directory fallback — the engine found its shaders and then failed on its textures from any other launch directory. Both now go through `IO::resolvePath`, and the three paths moved into `config.h` beside the shader paths so there is one list of on-disk assets.
+
+Measured on a clean Debug build at this commit: the unit suite grew from **81 test cases / 10358 assertions to 89 / 10378**, and the smoke test from **42 to 76 checks**. Both baselines were measured on a clean checkout of the pre-M12 tree rather than copied forward.
 
 ### Milestone 11 — Render Correctness: GPU Terrain & Culling
 

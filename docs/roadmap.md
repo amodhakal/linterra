@@ -1,6 +1,6 @@
 # Roadmap
 
-Milestones 1 through 11 are shipped and documented in the [Implemented Features](../README.md#implemented-features) section of the README. What follows is the planned sequence: M12 through M19. M10 was planned across 11 issues, of which #19 and #21 were already resolved on `main` when the milestone was picked up and were closed with evidence; the other nine shipped as a stack of pull requests. Each milestone is labelled with the matching `M10`..`M19` GitHub label so you can filter the issue list to just that slice. The milestones are **strictly ordered** — every one of them gates at least one other, because each depends on correctness or stability guarantees established by the ones before it. Attempting M15 before M12, or M17 before M13, produces work that has to be thrown away.
+Milestones 1 through 12 are shipped and documented in the [Implemented Features](../README.md#implemented-features) section of the README. What follows is the planned sequence: M13 through M19. M10 was planned across 11 issues, of which #19 and #21 were already resolved on `main` when the milestone was picked up and were closed with evidence; the other nine shipped as a stack of pull requests. Each milestone is labelled with the matching `M10`..`M19` GitHub label so you can filter the issue list to just that slice. The milestones are **strictly ordered** — every one of them gates at least one other, because each depends on correctness or stability guarantees established by the ones before it. Attempting M15 before M12, or M17 before M13, produces work that has to be thrown away.
 
 ---
 
@@ -134,9 +134,28 @@ Planned scope as planned:
 
 Issues: #4, #12, #66, #125, #126, #127, #135, #136, #140, #151
 
-### M12 — Resource Lifetime, Shutdown & Error Reporting
+### M12 — Resource Lifetime, Shutdown & Error Reporting — SHIPPED
 
-This milestone makes resource ownership well-defined and failures diagnosable. Today every GL resource is deleted *after* `glfwTerminate()` has already destroyed the context, a zero-sized framebuffer renders into a framebuffer/texture feedback loop, and an exception escaping a `ThreadPool` worker calls `std::terminate`. None of these are cosmetic: they are the failure modes that turn a bug into an unreproducible crash with no stack.
+**Status: shipped.** See the Milestone 12 section of the [README](../README.md#implemented-features) for the full write-up.
+
+The planned scope was: destroy GL resources before `glfwTerminate()`, stop the thread pool draining on shutdown, stop exceptions escaping workers, fix stale shader state across reloads, validate framebuffer resizes before caching them, and install `glfwSetErrorCallback` + `GL_DEBUG_OUTPUT`.
+
+**What the work actually found.** Two of the planned items turned out to be **latent rather than live**, and saying so changes what the milestone is worth:
+
+- **#130 (stale uniform locations) has no caller.** The `Application` constructor loads each shader exactly once, so no reload path exists to go stale. This is a fix for what a hot-reload or context-recreate feature *would* hit — real, but not currently reachable.
+- **#131 (moved-from shader state) likewise.** The move is exercised, but nothing inspects a stage after moving it.
+
+Everything else was live. The headline items were not cosmetic: **every GL object in the engine was being deleted after the context that owned them had been destroyed**, an exception from a worker **took the whole process down** rather than one chunk, and **100% of GL errors were unattributable** — arriving at the end of a frame, from the wrong frame, for a call up to 30 lines earlier.
+
+**Three defects were found that the milestone did not plan for**, all of them preconditions of the planned fixes:
+
+- **`glMemoryBarrier` is a null GLAD function pointer on the development platform** — a latent crash. Surfaced when #151 moved the barrier to the read site, which is where the milestone's own plan wanted it.
+- **The storage buffer had no allocation at all.** `convertBufferUsage` returned `GL_*_DRAW` for every buffer type, which is `GL_INVALID_ENUM` for `GL_SHADER_STORAGE_BUFFER`; the heightmap SSBO's `glBufferData` had been failing on every non-Apple build.
+- **`terminateWindowing` could be called twice** once the destructor took ownership of it, so it is now idempotent.
+
+**A recurring theme worth recording.** Four separate issues (#128, #142, #143, #147) turned out to be the *same* class of defect: code that treated a **refusal** as **success**. `resizeOffscreenTarget` refused a 0x0 allocation and the caller rendered into framebuffer 0; it rejected an incomplete framebuffer and cached the size anyway; it was unreachable from GLAD and the caller armed a callback over it; `getBufferSubData` failed and the caller consumed the untouched buffer. In every case the fix is the same shape — report the refusal, and make the caller act on it — and in every case a test that asserted only "no crash" passed regardless. The tests that actually caught them all read state back (`GL_FRAMEBUFFER_BINDING`, `glGetUniformLocation`, a drain counter) rather than inferring from the absence of an error.
+
+Planned scope as planned:
 
 **Shutdown Ordering**
 - Destroy all GL resources before `glfwTerminate()` tears down the context.
@@ -144,8 +163,8 @@ This milestone makes resource ownership well-defined and failures diagnosable. T
 - Stop exceptions escaping worker tasks into `std::terminate`.
 
 **Reload & Move Semantics**
-- Clear stale uniform locations across `Shader::load` / `load`Compute so a reload does not write through dangling indices.
-- Make a moved-from `OpenGLShader` stop reporting `isCompiled()` when its handle is zero.
+- Clear stale uniform locations across `Shader::load` / `loadCompute` so a reload does not write through dangling indices.
+- Make a moved-from `OpenGLShader` stop reporting `isCompiled()` while its handle is zero.
 - Validate the framebuffer resize *before* caching the new size, so a rejected resize does not permanently wedge the offscreen target.
 - Register the framebuffer resize callback only after GLAD is loaded, and never let `resizeOffscreenTarget` throw from inside a GLFW C callback.
 
@@ -156,9 +175,9 @@ This milestone makes resource ownership well-defined and failures diagnosable. T
 - Install a `glfwSetErrorCallback` and enable `GL_DEBUG_OUTPUT`, so GL errors carry call-site attribution.
 - Add top-level error handling in `main` so startup failures report rather than abort.
 
-Issues: #128, #129, #130, #131, #141, #142, #143, #144, #146, #147, #148, #149, #150, #157
+Issues: #128, #129, #130, #131, #141, #142, #143, #144, #146, #147, #148, #157
 
-**Status: open, 12 of the 14 issues remaining.** #149 (texture target hardcoded to `GL_TEXTURE_2D_ARRAY`) and #150 (zero-sized texture dimensions accepted by the power-of-two bit trick) landed before this milestone was picked up, under M11's stack, and are closed.
+**Note on the issue list:** it names `opengl_renderer.cpp` throwing on an incomplete framebuffer as one of the six startup failures #144 must handle. That throw no longer exists — #142 removed it, because `resizeOffscreenTarget` is reached from a GLFW C callback where an escaping exception is undefined behaviour. Five of the six remain, and #144's handler now also covers the paths #142 and #143 introduced.
 
 ### M13 — Threading, Chunk Pipeline & Player Physics
 
@@ -309,8 +328,8 @@ Work the milestones in numeric order. The numbering is not arbitrary; each numbe
 
 1. **M10 first.** It is pure enabling work with no dependencies of its own, and it is the only milestone that makes the rest verifiable. The headless smoke-test executable is what will prove that M11's fixes actually fixed something. **Shipped.**
 2. **M11 second.** It has the highest bug density in the roadmap and the fixes are individually small. Several of its issues are visible rendering errors that are currently shipped — wrong culling, invisible faces, chunks rendering other chunks' terrain — so it also has the highest visible payoff. **Shipped.** What it actually found was worse than the plan claimed: two of the three GPU-path defects were total rather than conditional, so on every non-Apple build the terrain path produced the heightmap of whichever chunk was dispatched last.
-3. **M12 third.** Establishes defined resource ownership and real error reporting before any further work churns GPU state. Doing this before the performance work is what stops M15 from turning leaks into mysteries.
-4. **M14 alongside M12.** These two touch different files and share no issues, so they parallelize cleanly.
+3. **M12 third.** Establishes defined resource ownership and real error reporting before any further work churns GPU state. Doing this before the performance work is what stops M15 from turning leaks into mysteries. **Shipped.** What it found was narrower and more systematic than planned: four of its issues were the same defect — a refusal treated as a success — and two of its twelve were latent rather than live.
+4. **M14 alongside M12.** These two touch different files and share no issues, so they parallelize cleanly. **M12 is now shipped; M14 is the only remaining milestone with nothing outstanding above it.**
 5. **M13 next.** The physics and concurrency fixes need M11's terrain correctness and M12's error reporting to be trustworthy; they are also best verified with the M10 smoke test watching for regressions.
 6. **M16 next.** Settles the render pipeline — stable vertex layout, single-sourced constants, real depth attachment — which is the input greedy meshing depends on.
 7. **M17.** Gameplay, on top of fixed physics and a varied world.
@@ -318,6 +337,8 @@ Work the milestones in numeric order. The numbering is not arbitrary; each numbe
 9. **M19.** Last. SVO plus LOD, on correct culling and a clean abstraction.
 
 **Parallelization.** M18 has no dependencies and carried no risk of blocking; it is shipped. M14 runs alongside M12 for the same reason, and is still available to start — with M11 done, **M12 and M14 are now the two milestones with nothing outstanding above them.**
+
+**What M12's landing changed.** M15 loses its last remaining blocker: it depended on M11 (correct frustum) and M12 (defined resource lifecycle), and both are now done — so **M15 is unblocked**. M16 was blocked on M12 alone and is now unblocked too, which makes M13, M15, M16 and M17 available, with M17 still waiting on M13 and M16 both. M14 remains independent of everything and can run in parallel.
 
 **What M11's landing changed.** M13's stated blocker ("`getPositionHighestY` resolves the wrong chunk for half of every chunk column, so physics work lands on an unreliable terrain query") is satisfied as of this milestone: the terrain query now reads back the chunk that actually wrote the slot. M13 remains blocked on M12 only, for the error-reporting dependency. M15 and M19 both lose M11 from their dependency list, leaving M15 blocked on M12 alone.
 
