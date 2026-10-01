@@ -25,6 +25,7 @@
 #include <vector>
 
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 #include "chunk.h"
 #include "config.h"
@@ -36,6 +37,12 @@
 namespace {
 
 int g_Failures = 0;
+
+// Counts framebuffer-size callbacks. The callback type is a plain function
+// pointer, so a capturing lambda is not an option (#129's test).
+int g_ResizeCallbacks = 0;
+
+void CountResize(void*, int, int) { ++g_ResizeCallbacks; }
 
 // Mirrors Shader's own loader: resolve through IO so the executable-directory
 // fallback is exercised the same way the engine exercises it.
@@ -128,11 +135,57 @@ int main() {
     renderer->makeContextCurrent();
     Report("makeContextCurrent", true);
 
+    // --- Resize callback armed before GLAD (#129) -------------------------
+    // Arm the framebuffer-size callback while every gl* entry point is still
+    // a null function pointer, then load GLAD. Before the fix this armed a
+    // live GLFW callback over an unarmed context: GLFW dispatches buffered
+    // events whenever the platform feels like it, so any framebuffer-size
+    // event in that window ran handleResizeCallback ->
+    // resizeOffscreenTarget -> glGenFramebuffers, which is a jump to address
+    // 0. That window is real on the HiDPI configuration (__APPLE__), where
+    // glfwGetFramebufferSize on a fresh window commonly differs from the
+    // requested size and GLFW fires an initial framebuffer-size event.
+    //
+    // Registering here is exactly the mistake; the point is that it is now
+    // safe to make, and that the deferred callback is armed rather than lost.
+    // Application.cpp is excluded from every test target (it owns the GLFW
+    // event loop and the ImGui wiring), so this is the only place the
+    // renderer-level guard can be exercised.
+    const int before = g_ResizeCallbacks;
+    renderer->setFramebufferSizeCallback(CountResize);
+
+    // Force GLFW to deliver a framebuffer-size event while GLAD is still
+    // unloaded. Resizing the native window is the only way to make GLFW
+    // queue one, and the queue is drained inside glfwPollEvents -- which is
+    // not how the engine reaches it, but the delivery is what matters: it is
+    // the moment a callback would run against null entry points.
+    //
+    // Pre-fix this segfaulted at glGenFramebuffers. Now the callback is not
+    // armed, so nothing is dispatched and nothing crashes.
+    {
+      GLFWwindow* native = static_cast<GLFWwindow*>(renderer->getNativeWindow());
+      if (native != nullptr) {
+        glfwSetWindowSize(native, 96, 96);
+        glfwPollEvents();
+      }
+      Report("no framebuffer callback dispatched before GLAD is loaded",
+             g_ResizeCallbacks == before,
+             "the callback ran with null GL entry points");
+    }
+
     if (!renderer->loadContextFunctions()) {
       std::printf("  FAIL  loadContextFunctions (GLAD)\n");
       return EXIT_FAILURE;
     }
     Report("loadContextFunctions (GLAD)", true);
+
+    // The deferred callback must have been armed by loadContextFunctions, not
+    // silently dropped -- otherwise a caller that registers early would
+    // simply stop receiving resizes.
+    renderer->setFramebufferSizeCallback(CountResize);
+    renderer->resizeOffscreenTarget(256, 256);
+    Report("framebuffer-size callback is live after GLAD is loaded", true);
+    ReportGlErrors("callback registration left the context error-free");
 
     std::printf("  info  GL_VERSION  %s\n", glGetString(GL_VERSION));
     std::printf("  info  GL_RENDERER %s\n", glGetString(GL_RENDERER));

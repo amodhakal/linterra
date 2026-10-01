@@ -271,12 +271,41 @@ void OpenGLRenderer::setScrollCallback(ScrollCallback callback) {
 
 void OpenGLRenderer::setFramebufferSizeCallback(FramebufferSizeCallback callback) {
   m_FramebufferSizeCallback = callback;
+
+  // Arm the callback only once the GL entry points exist. GLFW dispatches
+  // buffered events whenever the platform feels like it, not only from
+  // glfwPollEvents, so a callback registered before GLAD is loaded can run
+  // against a context where every gl* symbol is still a null function
+  // pointer. handleResizeCallback reaches resizeOffscreenTarget, whose first
+  // call is glGenFramebuffers -- a jump to address 0, with no exception and
+  // no diagnostic.
+  //
+  // Refusing is strictly better than arming: the caller can register the
+  // callback before GLAD if it likes, and it simply takes effect on the next
+  // loadContextFunctions() rather than crashing in between. Nothing is lost,
+  // because a resize that happens before the context exists has no GL work to
+  // do anyway.
+  if (!m_ContextFunctionsLoaded) {
+    m_PendingFramebufferSizeCallback = callback;
+    return;
+  }
+
   glfwSetFramebufferSizeCallback(m_Window, dispatchFramebufferSizeCallback);
 }
 
 bool OpenGLRenderer::loadContextFunctions() {
-  return gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) !=
-         0;
+  if (gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress)) == 0) {
+    return false;
+  }
+  m_ContextFunctionsLoaded = true;
+
+  // Arm anything that was registered before the entry points existed.
+  if (m_PendingFramebufferSizeCallback != nullptr) {
+    glfwSetFramebufferSizeCallback(m_Window,
+                                   dispatchFramebufferSizeCallback);
+    m_PendingFramebufferSizeCallback = nullptr;
+  }
+  return true;
 }
 
 void OpenGLRenderer::getFramebufferSize(int* width, int* height) {

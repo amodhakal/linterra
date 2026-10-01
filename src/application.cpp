@@ -40,7 +40,6 @@ Application::Application(const char* title, const std::uint32_t width, const std
   m_Renderer->setCursorDisabled();
   m_Renderer->setEventContext(this);
   m_Renderer->setCursorPosCallback(handleMouseCallback);
-  m_Renderer->setFramebufferSizeCallback(handleResizeCallback);
 
   if (!m_Renderer->loadContextFunctions()) {
     throw std::runtime_error("Failed to initialize GLAD");
@@ -106,6 +105,19 @@ Application::Application(const char* title, const std::uint32_t width, const std
   m_FrameWidth = static_cast<std::uint32_t>(fbWidth);
   m_FrameHeight = static_cast<std::uint32_t>(fbHeight);
   m_Renderer->resizeOffscreenTarget(m_FrameWidth, m_FrameHeight);
+
+  // Only now is the resize callback safe to arm. Both preconditions hold:
+  // GLAD has resolved the entry points, so handleResizeCallback no longer
+  // calls through null function pointers; and the offscreen target exists, so
+  // resizeOffscreenTarget has something to act on.
+  //
+  // Registering this before loadContextFunctions() left a window in which
+  // GLFW could dispatch a framebuffer-size event into an unarmed context.
+  // That window is not theoretical on the primary target: the __APPLE__
+  // branches make this the HiDPI configuration, where glfwGetFramebufferSize
+  // on a fresh window commonly differs from the requested 800x600, and GLFW
+  // fires the initial framebuffer-size event on the first glfwPollEvents.
+  m_Renderer->setFramebufferSizeCallback(handleResizeCallback);
 }
 
 Application::~Application() {

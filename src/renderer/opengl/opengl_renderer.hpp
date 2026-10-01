@@ -102,6 +102,9 @@ class OpenGLRenderer : public IRenderer {
   CursorPosCallback m_CursorPosCallback = nullptr;
   ScrollCallback m_ScrollCallback = nullptr;
   FramebufferSizeCallback m_FramebufferSizeCallback = nullptr;
+  // A callback registered before GLAD was loaded, armed once it is (#129).
+  FramebufferSizeCallback m_PendingFramebufferSizeCallback = nullptr;
+  bool m_ContextFunctionsLoaded = false;
 
   std::uint32_t m_OffscreenFbo = 0;
   std::uint32_t m_OffscreenColorTexture = 0;
