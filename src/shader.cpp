@@ -40,6 +40,12 @@ Shader& Shader::operator=(Shader&& other) noexcept {
 
 void Shader::load(const char* vertexPath, const char* fragmentPath) {
   m_Program.reset();
+  // A uniform location is not a name -- it is an integer slot the GL linker
+  // assigns for one specific program object. Two programs of the same source
+  // get unrelated slot assignments. Clearing the cache here is what stops a
+  // reload from writing uModel into whatever now occupies the integer that
+  // used to be uModel's slot (#130).
+  m_Uniforms.clear();
 
   auto vertexShader =
       m_Renderer->createShader(ShaderType::Vertex, getShaderSource(vertexPath).c_str());
@@ -62,6 +68,9 @@ void Shader::load(const char* vertexPath, const char* fragmentPath) {
 
 void Shader::loadCompute(const char* computePath) {
   m_Program.reset();
+  // See Shader::load: locations belong to the program they were resolved
+  // against, so the cache cannot outlive the program.
+  m_Uniforms.clear();
 
   auto computeShader =
       m_Renderer->createShader(ShaderType::Compute, getShaderSource(computePath).c_str());
