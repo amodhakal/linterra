@@ -28,7 +28,7 @@ class OpenGLRenderer : public IRenderer {
   void setBufferData(IBuffer& buffer, const void* data, size_t size,
                      BufferUsage usage) override;
   void bindBufferBase(IBuffer& buffer, uint32_t bindingPoint) override;
-  void getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) override;
+  bool getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) override;
   void dispatchCompute(uint32_t numGroupsX, uint32_t numGroupsY, uint32_t numGroupsZ) override;
 
   std::unique_ptr<IVertexArray> createVertexArray() override;
@@ -91,7 +91,7 @@ class OpenGLRenderer : public IRenderer {
   static void dispatchFramebufferSizeCallback(GLFWwindow* window, int width,
                                               int height);
 
-  static GLenum convertBufferUsage(BufferUsage usage);
+  static GLenum convertBufferUsage(BufferUsage usage, BufferType type);
   static GLenum convertDataType(DataType type);
   static GLenum convertIndexType(IndexType type);
   static GLenum convertPrimitiveType(PrimitiveType type);

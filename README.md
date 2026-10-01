@@ -176,13 +176,13 @@ The doctest framework is vendored at `vendor/doctest/include/doctest/doctest.h`
 
 ## Roadmap
 
-Milestones 1–10 and M18 are shipped (see [Implemented Features](#implemented-features) below). M11–M17 and M19 are the planned sequence, and they are strictly ordered — each gates the next. M18 is independent of engine behaviour and was worked in parallel with M10.
+Milestones 1–11 and M18 are shipped (see [Implemented Features](#implemented-features) below). M12–M17 and M19 are the planned sequence, and they are strictly ordered — each gates the next. M18 is independent of engine behaviour and was worked in parallel with M10.
 
 | Milestone | Title | Issues | Scope |
 | --- | --- | --- | --- |
 | ~~M10~~ | Build, CI & Safety Net | — | Shipped: headless smoke tests, game in CI, ASan/UBSan, shader validation, macOS runner |
-| M11 | Render Correctness: GPU Terrain & Culling | 10 | Fix culling, SSBO slots, winding |
-| M12 | Resource Lifetime, Shutdown & Error Reporting | 14 | Shutdown order, GL error attribution |
+| ~~M11~~ | Render Correctness: GPU Terrain & Culling | — | Shipped: uniform registration, SSBO slot lifetime, detectable readback failure, frustum & winding |
+| M12 | Resource Lifetime, Shutdown & Error Reporting | 12 | Shutdown order, GL error attribution |
 | M13 | Threading, Chunk Pipeline & Player Physics | 11 | Physics query, race windows |
 | M14 | Renderer Abstraction & Backend Portability | 9 | Split `IRenderer`, Metal/Vulkan |
 | M15 | Streaming & Draw-Path Performance | 10 | Draw-call sorting, greedy meshing |
@@ -196,6 +196,39 @@ Full dependency graph and issue lists: [docs/roadmap.md](docs/roadmap.md).
 ---
 
 ## Implemented Features
+
+### Milestone 11 — Render Correctness: GPU Terrain & Culling
+
+This milestone fixed the defects that made the rendered world visibly wrong, and it is the first milestone whose work could be *measured* rather than argued about — M10's headless smoke test is what made the difference between "would produce wrong terrain if the bound were ever violated" and a number.
+
+Two of the three issues in the final stack were found to be **total, not conditional**. That distinction is the headline: the GPU terrain path was not subtly degraded, it was non-functional, and nothing reported it.
+
+**The GPU terrain path did not work at all.** Three independent defects sat on the same path, each of which alone would have broken it:
+
+- **The `uSlot` compute uniform was never registered** (#125). `terrain.comp` declares nine uniforms; `ChunkManager` registered eight. `Shader::setUniformUInt` drops any write to a name that was never registered, so `uSlot` kept its GLSL default of `0`, and the shader computed `uint base = uSlot * uExtSide * uExtSide` — always `0`. **Every GPU chunk wrote into slot 0** of the batched heightmap SSBO, and slots 1–63 were never written by anyone. This produces no GL error, because no illegal call is made: the write is simply skipped.
+- **SSBO slots were recycled before their readback** (#126). The handout was `m_NextGpuSlot++ % kGpuSlots`, which consults nothing about the previous occupant. Readback is deferred by at least one frame, and one frame dispatches up to 1024 chunks against 64 slots, so **every slot was overwritten 16 times before the first readback could run**. Measured by simulating `render()`'s real ordering: **100% of readbacks (60416 / 60416) returned another chunk's heights.** Deterministic floating and overlapping terrain with hard seams along chunk borders — not an intermittent glitch.
+- **The storage buffer had no allocation** (found while testing #151). `convertBufferUsage` returned `GL_*_DRAW` for every buffer type; for `GL_SHADER_STORAGE_BUFFER` all three are `GL_INVALID_ENUM`, and `glBufferData` then allocates nothing. The heightmap SSBO is the only storage buffer in the codebase, so on every non-Apple build its allocation had been silently failing. Usage is now mapped per buffer type.
+
+Together these mean that on any build where `Constants::Noise::USE_GPU` is true — every non-Apple build — the engine's headline feature produced the heightmap of whichever chunk was dispatched last. The code comment asserting *"By now the compute dispatch is at least a frame old, so the GPU has almost always finished"* was true of the GPU and irrelevant: the slot's contents had already been replaced by something else.
+
+**Failure that could not be detected** (#151). `getBufferSubData` returned `void`, and `glGetBufferSubData` has no return value: on failure it writes nothing and leaves the caller's buffer untouched. `Chunk::finishHeightMapGPU` could therefore not distinguish a successful read from a failed one, so it truncated whatever the allocator handed back into `uint16_t`, installed it as authoritative terrain, and set `m_GpuHeightMapReady = true` — guaranteeing the bad heights were never re-derived. It now returns `bool`, bounds-checks before reaching the driver, drains the GL error locally, and **retries** rather than committing garbage. The `GL_BUFFER_UPDATE` barrier also moved from `dispatchCompute` to the read site, where the invariant actually lives; it was documented in `chunk.cpp` and implemented three files away.
+
+**Frustum & geometry.** The side-plane computation used degrees where radians were intended (#127); `isBlockExposed` gained a bounds assertion and the plane-normal/AABB conventions were pinned (#4, #66); the camera aspect ratio now updates on window resize (#12); bottom (−Y) faces were wound backwards and silently back-face culled, with the winding table made testable (#140).
+
+**Heightmap correctness.** Chunk heightmaps are value-initialised and `getHighestBlockY` is non-public and bounds-checked (#135); the negative-`float`-to-`uint16_t` conversion was undefined behaviour and is now total, with out-of-range input clamped (#136).
+
+**What made it verifiable.** The GPU defects were unreachable by the existing suite: `linterra_core` excludes `chunk.cpp` and `manager.cpp` because `chunk.h` includes `<glad/glad.h>` unconditionally. So the fixes are built on extracted, GL-free units that the unit suite can reach directly:
+
+- `GpuSlotPool` (`src/gpu_slot_pool.h`) — a free-list with no GL and no `ChunkManager` state, so the slot-lifetime policy is tested directly rather than inferred. Seven cases, including an end-to-end simulation of the real frame ordering asserting no chunk ever reads another's slot, and one pinning the pre-fix number (4161 of 4225 stale) so it cannot silently rot.
+- `Constants::TERRAIN_COMPUTE_UNIFORMS` — the compute shader's uniform list is now a single source of truth, and `tests/test_shader_uniforms.cpp` parses `terrain.comp` and compares against it **in both directions**. A guard case asserts the parse found ≥9 uniforms so the comparison cannot pass vacuously.
+- `Shader::newUniform` no longer records a failed lookup. It used to store the `-1` it had just diagnosed, which made `setUniform*` believe the name was known and hand `-1` to GL, where it is ignored — so a name *registered but misspelled* failed just as silently as one never registered. The same bug class, from the other direction.
+
+The suite grew from 70 test cases / 10183 assertions to **81 / 10358**, and the smoke test from 41 to **42 checks** (all three figures measured on a clean Debug build at this commit, not carried forward from the Milestone 10 numbers). Two smoke checks report an explicit `skip` rather than passing silently — see the verification note below.
+
+**Two findings that contradict the milestone's own premise.** Both are worth recording precisely because they change what the milestone's remaining budget buys:
+
+- **The GPU path could not be verified on the development platform.** `Constants::Noise::USE_GPU` is a `constexpr false` on Apple, so every fix here is provable as a *scheduling or uniform-registration property* and not as resulting terrain. macOS also caps at GL 4.1 with `GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS == 0`, so the new readback assertions skip locally; Linux CI runs them under `xvfb` against Mesa. That CI run is the real verification and had not happened when these were written.
+- **One latent crash was found by adding a barrier, not by the milestone's own scope.** `glMemoryBarrier` is a GLAD function pointer and is **null on this machine's context** — calling it is a jump to address 0. Moving the barrier to the read site turned a latent crash into an immediate segfault, which is how it was found; both call sites are now guarded on the pointer.
 
 ### Milestone 18 — Documentation, Licensing & Code Hygiene
 
@@ -231,13 +264,13 @@ This milestone turned "it builds on my machine" into an automated safety net. Pr
 
 **CI Coverage**
 - The build now runs on **macOS as well as Ubuntu**. This is not redundant: the engine is developed and run on macOS, and it is the only platform that compiles the `__APPLE__` branches — the `USE_GPU` noise selection in `config.h`, the `_NSGetExecutablePath` path in `io.cpp`, and the forward-compat and 3.3-context hints in the OpenGL renderer.
-- **`linterra_smoke`**, a new headless executable that creates a *hidden* GLFW window — a real offscreen GL context with nothing on screen — and drives the actual engine classes through the sequence `Application` uses. It covers shader compilation and linking, uniform resolution, buffer and VAO creation, chunk mesh generation and GPU upload, draw submission, the offscreen framebuffer, and context teardown, asserting on observable state rather than pixels. 34 checks.
+- **`linterra_smoke`**, a new headless executable that creates a *hidden* GLFW window — a real offscreen GL context with nothing on screen — and drives the actual engine classes through the sequence `Application` uses. It covers shader compilation and linking, uniform resolution, buffer and VAO creation, chunk mesh generation and GPU upload, draw submission, the offscreen framebuffer, and context teardown, asserting on observable state rather than pixels. 34 checks as of Milestone 10; the suite has since grown — see Milestone 11.
 - **Shader validation** with `glslangValidator`, in its own job. Shaders are compiled by the driver at runtime, so a syntax error previously surfaced only as a broken frame on a machine with a GL context.
 - **ASan + UBSan** over the suite, via a new `-DLINTERRA_SANITIZE` option. `just dev` had been able to do this locally but nothing ran it automatically. The option replaces a `CMAKE_CXX_FLAGS` string that never reached the C sources (`vendor/glad/src/glad.c`) or the link line reliably.
 
 **Test Coverage**
 - **`linterra_core`**, a static library of the GL-free engine sources (`camera`, `frustum`, `io`, `player`, `threadpool`) linked by both the game and the tests. Previously `linterra_tests` named `src/camera.cpp` and `src/frustum.cpp` directly, compiling a second copy — the suite was testing code the game did not use, and nothing would have caught the two drifting apart.
-- **Four more subsystems under test**: `ThreadPool` (task completion, genuine concurrency, and enforcement of the pending-task cap that stops one frame flooding the pool), `PackedVertex` (the 4-byte vertex format pinned bit for bit), `IO` (byte-exact reads, CRLF and lone-CR preservation, the executable-directory fallback), and `Player` (mouse-look, pitch clamping, view-vector normalisation). The suite grew from 14 test cases / 554 assertions to **40 / 675**.
+- **Four more subsystems under test**: `ThreadPool` (task completion, genuine concurrency, and enforcement of the pending-task cap that stops one frame flooding the pool), `PackedVertex` (the 4-byte vertex format pinned bit for bit), `IO` (byte-exact reads, CRLF and lone-CR preservation, the executable-directory fallback), and `Player` (mouse-look, pitch clamping, view-vector normalisation). The suite grew from 14 test cases / 554 assertions to **40 / 675** as of Milestone 10; it has since grown further — see Milestone 11.
 
 **Notes**
 - The smoke test runs on the Linux runner under `xvfb-run` with Mesa's software rasteriser. A GitHub macOS runner has no window server session, so no CGL context can be created there at all; the macOS job still compiles every Apple-specific branch and runs the unit suite.

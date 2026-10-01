@@ -104,12 +104,31 @@ void Chunk::finishHeightMapGPU(uint32_t slotOffset, IBuffer &ssbo) {
 
   // Stage 2: read back this chunk's slot of the batched SSBO. Called
   // deferred (at least one frame after dispatch) so the GPU has usually
-  // already finished; the memory barrier issued at dispatch time makes the
-  // writes visible without a full pipeline stall.
+  // already finished. The renderer issues the GL_BUFFER_UPDATE barrier at the
+  // read site itself, so the visibility guarantee no longer depends on
+  // dispatchCompute happening to do the right thing.
   size_t byteCount = kExtSide * kExtSide * sizeof(uint32_t);
   size_t slotBytes = static_cast<size_t>(slotOffset) * byteCount;
-  std::vector<uint32_t> gpuHeights(kExtSide * kExtSide);
-  m_Renderer->getBufferSubData(ssbo, slotBytes, byteCount, gpuHeights.data());
+
+  // A member rather than a local: resize is a no-op once it has reached
+  // kExtSide*kExtSide, so steady-state streaming no longer allocates and frees
+  // 1296 bytes per chunk per readback (#48 tracks the broader allocator
+  // pressure in this pipeline).
+  m_ReadbackScratch.resize(kExtSide * kExtSide);
+
+  if (!m_Renderer->getBufferSubData(ssbo, slotBytes, byteCount,
+                                    m_ReadbackScratch.data())) {
+    // Leave m_GpuHeightMapReady false so this is retried on a later frame.
+    // Consuming the buffer anyway would truncate whatever the allocator
+    // handed back into uint16_t and install it as authoritative terrain, with
+    // m_GpuHeightMapReady = true guaranteeing the bad heights are never
+    // re-derived. A readback failure is transient (context recovery, a
+    // configuration mismatch), so retrying is also what turns a silent
+    // permanent corruption into a visible, debuggable symptom.
+    return;
+  }
+
+  const std::vector<uint32_t> &gpuHeights = m_ReadbackScratch;
 
   for (uint32_t ex = 0; ex < kExtSide; ex++) {
     for (uint32_t ez = 0; ez < kExtSide; ez++) {

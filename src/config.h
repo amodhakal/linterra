@@ -9,6 +9,7 @@
 #include <GLFW/glfw3.h>
 #endif
 
+#include <array>
 #include <cstdint>
 #include <glm/glm.hpp>
 
@@ -22,6 +23,22 @@ constexpr auto RENDER_FRAGMENT_PATH = "./shaders/render.frag";
 constexpr auto FOG_VERTEX_PATH = "./shaders/fog.vert";
 constexpr auto FOG_FRAGMENT_PATH = "./shaders/fog.frag";
 constexpr auto TERRAIN_COMPUTE_PATH = "./shaders/terrain.comp";
+
+// Every uniform the terrain compute shader declares. This is the single
+// source of truth: ChunkManager registers exactly these names, and
+// tests/test_shader_uniforms.cpp asserts the list stays equal to the set of
+// uniforms declared in terrain.comp.
+//
+// It has to be one list rather than a call per uniform at the registration
+// site because Shader::setUniform* silently drops a write to a name that was
+// never registered. A name added to the GLSL without being added here is
+// therefore invisible at runtime -- the shader keeps its default value and
+// nothing reports an error. That is not hypothetical: uSlot was missing from
+// this list, so every GPU chunk computed base == 0 and overwrote SSBO slot 0.
+constexpr std::array<const char *, 9> TERRAIN_COMPUTE_UNIFORMS = {
+    "uChunkPos", "uFrequency", "uMaxHeight", "uExtSide", "uSeed",
+    "uOctaves",  "uGain",      "uLacunarity", "uSlot",
+};
 
 constexpr std::uint32_t SCR_WIDTH = 800;
 constexpr std::uint32_t SCR_HEIGHT = 600;

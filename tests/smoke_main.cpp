@@ -197,6 +197,44 @@ int main() {
       fog.newUniform("uFogColor");
     }
 
+    // --- Terrain compute shader --------------------------------------------
+    // Every uniform in Constants::TERRAIN_COMPUTE_UNIFORMS must resolve to a
+    // real location in the linked compute program. tests/test_shader_uniforms.cpp
+    // checks the same list against the GLSL source without needing a context;
+    // this is the half that can only be checked by the driver, and it is what
+    // would have caught #125 (uSlot unregistered -> every chunk writes SSBO
+    // slot 0, with glGetError() clean throughout because no illegal call is
+    // made).
+    //
+    // Compute shaders need GL 4.3. macOS caps out at 4.1, so this block is
+    // skipped there and the static check is the only coverage on that platform.
+    // A skip is reported, never silently passed.
+    {
+      GLint major = 0;
+      GLint minor = 0;
+      glGetIntegerv(GL_MAJOR_VERSION, &major);
+      glGetIntegerv(GL_MINOR_VERSION, &minor);
+      if (major < 4 || (major == 4 && minor < 3)) {
+        std::printf("  skip  terrain compute uniforms: needs GL 4.3, context "
+                    "is %d.%d\n",
+                    major, minor);
+      } else {
+        Shader compute(renderer.get());
+        compute.loadCompute(Constants::TERRAIN_COMPUTE_PATH);
+        Report("terrain compute shader compiles and links", true);
+        for (const char *name : Constants::TERRAIN_COMPUTE_UNIFORMS) {
+          compute.newUniform(name);
+          // Read the location back rather than trusting glGetError: a dropped
+          // write is a silent no-op, not a GL error, so asserting on the error
+          // state alone would pass either way.
+          Report(std::string("compute uniform resolves: ") + name,
+                 compute.hasUniform(name) && compute.uniformLocation(name) >= 0,
+                 "location = " + std::to_string(compute.uniformLocation(name)));
+        }
+      }
+    }
+    ReportGlErrors("shader stage is error-free");
+
     // --- Chunk generation and GPU upload ----------------------------------
     // generateMeshData + generateMesh is the CPU half of the pipeline; pass()
     // is the hand-off that creates the VBO/EBO/VAO and uploads. This is the
@@ -350,6 +388,101 @@ int main() {
           ReportGlErrors("array draw submission");
 
           renderer->bindVertexArray(*vao);
+        }
+      }
+    }
+
+    // (readback block temporarily removed)
+
+    // --- Buffer readback ---------------------------------------------------
+    // getBufferSubData reports failure through a return value (#151). It used
+    // to return void, so a failed read was indistinguishable from a successful
+    // one: glGetBufferSubData leaves `data` untouched on GL_INVALID_VALUE, and
+    // Chunk::finishHeightMapGPU then truncated whatever was in the buffer into
+    // uint16_t and committed it as authoritative terrain.
+    //
+    // These assert on the return value and on the bytes read back. Asserting
+    // on glGetError() alone would prove nothing -- an out-of-range read is a
+    // perfectly legal-looking call from the test's side.
+    //
+    // Shader storage buffers need GL 4.3. Apple's OpenGL reports 4.1 and
+    // reports GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS as 0, so the version gate
+    // is also the capability gate here. The limit is deliberately not queried:
+    // glGetIntegerv with that enum is GL_INVALID_ENUM on a 4.1 context, and
+    // the resulting error poisons every later glGetError check in this file.
+    // A skip is reported, never silently passed.
+    {
+      GLint major = 0;
+      GLint minor = 0;
+      glGetIntegerv(GL_MAJOR_VERSION, &major);
+      glGetIntegerv(GL_MINOR_VERSION, &minor);
+      if (major < 4 || (major == 4 && minor < 3)) {
+        std::printf(
+            "  skip  buffer readback: needs GL 4.3 for shader storage "
+            "buffers, context is %d.%d\n",
+            major, minor);
+      } else {
+        auto storage = renderer->createBuffer(BufferType::Storage);
+        if (!storage) {
+          Report("storage buffer creation", false);
+        } else {
+          // A recognisable pattern, so a readback that silently returns
+          // allocator garbage cannot pass.
+          std::vector<uint32_t> written(64);
+          for (std::size_t i = 0; i < written.size(); ++i) {
+            written[i] = 0xA5000000u | static_cast<uint32_t>(i);
+          }
+          renderer->setBufferData(*storage, written.data(),
+                                  written.size() * sizeof(uint32_t),
+                                  BufferUsage::Static);
+          ReportGlErrors("storage buffer upload");
+
+          std::vector<uint32_t> readback(written.size(), 0u);
+          const bool ok = renderer->getBufferSubData(
+              *storage, 0, written.size() * sizeof(uint32_t),
+              readback.data());
+          Report("getBufferSubData reports success for an in-range read", ok);
+          ReportGlErrors("in-range readback is error-free");
+
+          // Read the state back rather than trusting the return value alone.
+          bool identical = true;
+          for (std::size_t i = 0; i < written.size(); ++i) {
+            if (readback[i] != written[i]) {
+              identical = false;
+              break;
+            }
+          }
+          Report("in-range readback returns the bytes that were written",
+                 identical,
+                 identical ? "" : "readback did not match the upload");
+
+          // The regression: an out-of-range read must report failure and must
+          // not leave the caller's buffer looking like a valid result. This is
+          // what a batch-size / SSBO-size mismatch would produce.
+          std::vector<uint32_t> sentinel(4, 0xDEADBEEFu);
+          const bool oobOk = renderer->getBufferSubData(
+              *storage, written.size() * sizeof(uint32_t), sizeof(uint32_t),
+              sentinel.data());
+          Report("getBufferSubData rejects an out-of-range read", !oobOk,
+                 "a read past the end of the buffer must return false");
+          ReportGlErrors("out-of-range readback drains its own error");
+
+          // The destination must be untouched, so a caller that ignores the
+          // return value cannot mistake stale data for terrain.
+          bool untouched = true;
+          for (const uint32_t value : sentinel) {
+            if (value != 0xDEADBEEFu) {
+              untouched = false;
+              break;
+            }
+          }
+          Report("a rejected read leaves the destination untouched", untouched);
+
+          // The reported size must match what was allocated, since that is
+          // what the bounds check trusts.
+          Report("getSize matches the allocation",
+                 storage->getSize() == written.size() * sizeof(uint32_t),
+                 "getSize = " + std::to_string(storage->getSize()));
         }
       }
     }

@@ -102,11 +102,26 @@ void Shader::newUniform(const char* name) {
     if (location < 0) {
       std::fprintf(stderr,
                    "Shader::newUniform: uniform \"%s\" not found in shader "
-                   "program (location = -1)\n",
+                   "program (location = -1); writes to it will be dropped\n",
                    name);
+      // Deliberately not recorded. Registering -1 would make
+      // setUniform* believe the name is known and hand -1 to GL, which
+      // ignores it -- so the write would be dropped with no diagnostic at
+      // all. Leaving it out means the name stays unknown, which is what the
+      // test in tests/test_shader_uniforms.cpp checks for.
+      return;
     }
     m_Uniforms[name] = location;
   }
+}
+
+bool Shader::hasUniform(const char* name) const {
+  return m_Uniforms.contains(name);
+}
+
+int Shader::uniformLocation(const char* name) const {
+  const auto it = m_Uniforms.find(name);
+  return it == m_Uniforms.end() ? -1 : it->second;
 }
 
 void Shader::setUniformMat4(const char* name, const glm::mat4& values) {

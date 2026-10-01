@@ -84,6 +84,10 @@ class IBuffer {
   virtual void bind() = 0;
   virtual void unbind() = 0;
   virtual uint32_t getId() const = 0;
+  // Bytes currently allocated. Lets a readback be bounds-checked before it
+  // reaches the driver, so an out-of-range read is caught here rather than
+  // becoming a GL error that the caller cannot see.
+  virtual size_t getSize() const = 0;
 };
 
 class IVertexArray {
@@ -152,7 +156,9 @@ class IRenderer {
   virtual void setBufferData(IBuffer& buffer, const void* data, size_t size,
                               BufferUsage usage) = 0;
   virtual void bindBufferBase(IBuffer& buffer, uint32_t bindingPoint) = 0;
-  virtual void getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) = 0;
+  // Returns false if the read failed -- out of range, or the driver raised a
+  // GL error. `data` is then left untouched, so a caller must not consume it.
+  virtual bool getBufferSubData(IBuffer& buffer, size_t offset, size_t size, void* data) = 0;
   virtual void dispatchCompute(uint32_t numGroupsX, uint32_t numGroupsY, uint32_t numGroupsZ) = 0;
 
   virtual std::unique_ptr<IVertexArray> createVertexArray() = 0;

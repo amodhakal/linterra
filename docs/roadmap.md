@@ -1,6 +1,6 @@
 # Roadmap
 
-Milestones 1 through 10 are shipped and documented in the [Implemented Features](../README.md#implemented-features) section of the README. What follows is the planned sequence: M11 through M19. M10 was planned across 11 issues, of which #19 and #21 were already resolved on `main` when the milestone was picked up and were closed with evidence; the other nine shipped as a stack of pull requests. Each milestone is labelled with the matching `M10`..`M19` GitHub label so you can filter the issue list to just that slice. The milestones are **strictly ordered** — every one of them gates at least one other, because each depends on correctness or stability guarantees established by the ones before it. Attempting M13 before M11, or M15 before M12, produces work that has to be thrown away.
+Milestones 1 through 11 are shipped and documented in the [Implemented Features](../README.md#implemented-features) section of the README. What follows is the planned sequence: M12 through M19. M10 was planned across 11 issues, of which #19 and #21 were already resolved on `main` when the milestone was picked up and were closed with evidence; the other nine shipped as a stack of pull requests. Each milestone is labelled with the matching `M10`..`M19` GitHub label so you can filter the issue list to just that slice. The milestones are **strictly ordered** — every one of them gates at least one other, because each depends on correctness or stability guarantees established by the ones before it. Attempting M15 before M12, or M17 before M13, produces work that has to be thrown away.
 
 ---
 
@@ -9,12 +9,12 @@ Milestones 1 through 10 are shipped and documented in the [Implemented Features]
 ```
                           ┌──────────────────────────────────────────┐
                           │  M18  Documentation, Licensing, Hygiene    │
-                          │  (independent — start any time, parallel)  │
+                          │  (independent)                    SHIPPED │
                           └──────────────────────────────────────────┘
 
    ┌─────────────────────────────────────────────────────────────────────┐
    │                                                                     │
-   │  M10  Build, CI & Safety Net          ◄── gates EVERYTHING below    │
+   │  M10  Build, CI & Safety Net  SHIPPED ◄── gates EVERYTHING below    │
    │  headless smoke test + game-target-in-CI                             │
    └─────────────────────────────────────────────────────────────────────┘
               │                        │                      │
@@ -22,7 +22,7 @@ Milestones 1 through 10 are shipped and documented in the [Implemented Features]
    ┌────────────────────────┐  ┌────────────────────┐  ┌──────────────────┐
    │ M11  Render Correctness │  │ M12  Resource      │  │ M14  Renderer    │
    │ GPU terrain & culling  │  │ Lifetime, Shutdown │  │ Abstraction &    │
-   │                        │  │ & Error Reporting  │  │ Portability      │
+   │                   SHIP │  │ & Error Reporting  │  │ Portability      │
    └───┬───────┬───────┬────┘  └───┬──────────┬────┘  └────────┬─────────┘
        │       │       │            │          │               │
        │       │       │            │          │               │
@@ -101,9 +101,21 @@ Historical scope as planned:
 
 Issues: #19, #21, #65, #67, #68, #69, #73, #74, #89, #154, #155
 
-### M11 — Render Correctness: GPU Terrain & Culling
+### M11 — Render Correctness: GPU Terrain & Culling — SHIPPED
 
-This milestone fixes the defects that make the rendered world visibly wrong. Several of these are not subtle: frustum side planes are computed with degrees where radians were intended, bottom faces are wound backwards and silently back-face culled, and every GPU chunk writes to SSBO slot 0 because a compute uniform is never registered. The high bug density and the small size of the individual fixes make this the highest-value milestone in the roadmap — and the one that most needs M10 underneath it.
+**Status: shipped.** See the Milestone 11 section of the [README](../README.md#implemented-features) for the full write-up.
+
+The planned scope was: frustum side planes computed with degrees where radians were intended, bottom faces wound backwards, every GPU chunk writing to SSBO slot 0 because a compute uniform was never registered, SSBO slots recycled before the deferred readback completed, and a missing read barrier. The high bug density and the small size of the individual fixes made this the highest-value milestone in the roadmap.
+
+**What the measurements changed.** Two of the three defects worked in the final stack were not conditional. The `uSlot` gap meant every GPU chunk computed a base offset of `0`; slot recycling meant **100% of readbacks (60416 / 60416) returned another chunk's heights**, with a slot overwritten 16 times before its consumer read it. The milestone's own premise — that these were wrong-terrain-if-the-bound-were-violated defects — understated the case: on any non-Apple build the GPU terrain path did not work at all, and nothing reported it.
+
+Two further findings contradicted the plan rather than completing it. **The storage buffer had no allocation**: `convertBufferUsage` returned `GL_*_DRAW` for every buffer type, which is `GL_INVALID_ENUM` for `GL_SHADER_STORAGE_BUFFER`, so the heightmap SSBO's `glBufferData` had been failing silently on every non-Apple build. And **a latent null-pointer crash** — `glMemoryBarrier` is a GLAD function pointer that is null on the development platform's context — was exposed only by moving the barrier to the read site, which is where the milestone's own plan wanted it.
+
+**What could not be verified here.** `Constants::Noise::USE_GPU` is a `constexpr false` on Apple, so every fix in this milestone is provable as a uniform-registration or scheduling *property* and not as resulting terrain. Two smoke checks skip on macOS for the same reason (GL 4.1, `GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS == 0`); Linux CI runs them under `xvfb` against Mesa. That is a coverage gap inherited from M10's decision to keep the GPU path off on Apple, not a gap introduced here — but it is the reason the M11 write-up separates "measured" from "proven by construction".
+
+The fixes were made reachable by extracting two GL-free units the unit suite can actually link: `GpuSlotPool`, a free-list carrying the slot-lifetime policy, and `Constants::TERRAIN_COMPUTE_UNIFORMS`, checked against `terrain.comp` in both directions by `tests/test_shader_uniforms.cpp`.
+
+Planned scope as planned:
 
 **Frustum Culling**
 - Fix the side-plane computation using degrees instead of radians, which collapses the planes at low FOV and wastes draws across the frustum.
@@ -145,6 +157,8 @@ This milestone makes resource ownership well-defined and failures diagnosable. T
 - Add top-level error handling in `main` so startup failures report rather than abort.
 
 Issues: #128, #129, #130, #131, #141, #142, #143, #144, #146, #147, #148, #149, #150, #157
+
+**Status: open, 12 of the 14 issues remaining.** #149 (texture target hardcoded to `GL_TEXTURE_2D_ARRAY`) and #150 (zero-sized texture dimensions accepted by the power-of-two bit trick) landed before this milestone was picked up, under M11's stack, and are closed.
 
 ### M13 — Threading, Chunk Pipeline & Player Physics
 
@@ -293,8 +307,8 @@ Issues: #6
 
 Work the milestones in numeric order. The numbering is not arbitrary; each number is the earliest point at which the work is verifiable or correct.
 
-1. **M10 first.** It is pure enabling work with no dependencies of its own, and it is the only milestone that makes the rest verifiable. The headless smoke-test executable is what will prove that M11's fixes actually fixed something.
-2. **M11 second.** It has the highest bug density in the roadmap and the fixes are individually small. Several of its issues are visible rendering errors that are currently shipped — wrong culling, invisible faces, chunks rendering other chunks' terrain — so it also has the highest visible payoff.
+1. **M10 first.** It is pure enabling work with no dependencies of its own, and it is the only milestone that makes the rest verifiable. The headless smoke-test executable is what will prove that M11's fixes actually fixed something. **Shipped.**
+2. **M11 second.** It has the highest bug density in the roadmap and the fixes are individually small. Several of its issues are visible rendering errors that are currently shipped — wrong culling, invisible faces, chunks rendering other chunks' terrain — so it also has the highest visible payoff. **Shipped.** What it actually found was worse than the plan claimed: two of the three GPU-path defects were total rather than conditional, so on every non-Apple build the terrain path produced the heightmap of whichever chunk was dispatched last.
 3. **M12 third.** Establishes defined resource ownership and real error reporting before any further work churns GPU state. Doing this before the performance work is what stops M15 from turning leaks into mysteries.
 4. **M14 alongside M12.** These two touch different files and share no issues, so they parallelize cleanly.
 5. **M13 next.** The physics and concurrency fixes need M11's terrain correctness and M12's error reporting to be trustworthy; they are also best verified with the M10 smoke test watching for regressions.
@@ -303,10 +317,12 @@ Work the milestones in numeric order. The numbering is not arbitrary; each numbe
 8. **M15.** Performance work, once the frustum is right and the resource lifecycle is defined. Every measurement taken before this point is unreliable.
 9. **M19.** Last. SVO plus LOD, on correct culling and a clean abstraction.
 
-**Parallelization.** M18 can be worked at any point, including from the start — it has no dependencies and no risk of blocking. M14 runs alongside M12 for the same reason.
+**Parallelization.** M18 has no dependencies and carried no risk of blocking; it is shipped. M14 runs alongside M12 for the same reason, and is still available to start — with M11 done, **M12 and M14 are now the two milestones with nothing outstanding above them.**
+
+**What M11's landing changed.** M13's stated blocker ("`getPositionHighestY` resolves the wrong chunk for half of every chunk column, so physics work lands on an unreliable terrain query") is satisfied as of this milestone: the terrain query now reads back the chunk that actually wrote the slot. M13 remains blocked on M12 only, for the error-reporting dependency. M15 and M19 both lose M11 from their dependency list, leaving M15 blocked on M12 alone.
 
 **Do not start early, and why.**
-- **Do not begin M13 before M11.** `getPositionHighestY` resolves the wrong chunk for half of every chunk column, so physics work lands on an unreliable terrain query and will have to be redone.
-- **Do not begin M15 before M11 and M12.** Performance numbers taken against a broken frustum or an undefined resource lifecycle are not data — they are noise that will be optimized against.
+- ~~**Do not begin M13 before M11.**~~ Satisfied. The terrain query is correct as of M11, though note that M11 proved the property by construction and measurement rather than by rendering — the GPU path is off on Apple, so the terrain correctness M13 now depends on is verified on Linux CI.
+- **Do not begin M15 before M12.** Performance numbers taken against a broken frustum or an undefined resource lifecycle are not data — they are noise that will be optimized against.
 - **Do not begin M17 before M13 and M16.** Block placement needs a correct collision query, and a world worth interacting with.
 - **Do not begin M19 before M11 and M14.** LOD inherits every culling bug and multiplies its severity per level, and it should not be built on an abstraction that still leaks backend types.
