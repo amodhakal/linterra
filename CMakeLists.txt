@@ -191,6 +191,7 @@ if(BUILD_TESTS)
     tests/test_main.cpp
     tests/test_noise.cpp
     tests/test_camera.cpp
+    tests/test_chunk_octree.cpp
     tests/test_frustum.cpp
     tests/test_gpu_slot_pool.cpp
     tests/test_heightmap.cpp

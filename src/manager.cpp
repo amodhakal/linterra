@@ -32,6 +32,33 @@ constexpr float kChunkBlockExtent =
 constexpr float kChunkCenterOffset = kChunkBlockExtent * 0.5f;
 
 
+// Nearest squared distance from the camera to the world-block AABB of an octree
+// cell, in blocks.
+//
+// The eviction sweep needs this to decide a cell in one test instead of one test
+// per chunk in it. The cell is only safe to drop when even its NEAREST chunk is
+// out of range, so the test is against the near corner of the cell's footprint
+// in chunk-centre terms -- the same quantity getChunkDistanceSquared computes
+// for a single chunk, generalised to a square of them.
+float getCellDistanceSquared(const glm::ivec2 &cellOrigin, int level,
+                             const glm::vec3 &cameraPos) {
+  const float side = static_cast<float>(1 << level);
+  const float minX = static_cast<float>(cellOrigin.x) * kChunkBlockExtent +
+                     kChunkCenterOffset;
+  const float minZ = static_cast<float>(cellOrigin.y) * kChunkBlockExtent +
+                     kChunkCenterOffset;
+  const float maxX = minX + (side - 1.0f) * kChunkBlockExtent;
+  const float maxZ = minZ + (side - 1.0f) * kChunkBlockExtent;
+  // Clamp the camera into the cell's footprint, then measure. Only the x/z axes
+  // matter: distance has always been horizontal here, because a chunk is a
+  // column and its height does not affect whether it is worth keeping.
+  const float dx = std::max(minX - cameraPos.x, 0.0f) +
+                   std::max(cameraPos.x - maxX, 0.0f);
+  const float dz = std::max(minZ - cameraPos.z, 0.0f) +
+                   std::max(cameraPos.z - maxZ, 0.0f);
+  return dx * dx + dz * dz;
+}
+
 }  // namespace
 
 
@@ -84,15 +111,13 @@ void ChunkManager::shutdown() {
   // Left to member destruction this happens after ~OpenGLRenderer has
   // terminated windowing (#128), so this is the ordering fix and the discard
   // is the responsiveness fix -- both matter here.
-  for (auto &entry : m_ProcessingChunks) {
-    entry.second.chunk.cleanup();
-  }
+  m_ProcessingChunks.forEachValue(
+      [](const glm::ivec2 &, TaskResult &result) { result.chunk.cleanup(); });
   m_ProcessingChunks.clear();
   m_ProcessingPositions.clear();
 
-  for (auto &entry : m_ProcessedChunks) {
-    entry.second.cleanup();
-  }
+  m_ProcessedChunks.forEachValue(
+      [](const glm::ivec2 &, Chunk &chunk) { chunk.cleanup(); });
   m_ProcessedChunks.clear();
 
   if (m_HeightMapSSBO) {
@@ -107,21 +132,32 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       static_cast<float>(Constants::Chunk::RENDER_DISTANCE_BLOCKS);
   const float renderDistSq = renderDistBlocks * renderDistBlocks;
 
-  for (auto it = m_ProcessedChunks.begin(); it != m_ProcessedChunks.end();) {
-    const glm::ivec2 &position = it->first;
+  // Eviction, as a tree walk. The old loop tested every resident chunk's
+  // distance on every frame; a cell whose nearest chunk is out of range is
+  // dropped in one test, and a cell wholly inside the range is not descended
+  // into at all. A cell that straddles the boundary -- which is most of the
+  // interesting ones, since the boundary is a circle -- is descended into, so
+  // the outcome is identical to the per-chunk test it replaces.
+  //
+  // cleanup() runs per evicted chunk, before the value is destroyed: the octree
+  // knows nothing about VBO/VAO lifetimes and must not free one silently.
+  m_ProcessedChunks.eraseSubtrees(
+      [&](int level, const glm::ivec2 &origin) {
+        return getCellDistanceSquared(origin, level, cameraPosition) >
+               renderDistSq;
+      },
+      [](Chunk &chunk) { chunk.cleanup(); });
 
-    if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
-      it->second.cleanup();
-      it = m_ProcessedChunks.erase(it);
-      continue;
-    }
-
-    ++it;
-  }
-
-  for (auto it = m_ProcessingChunks.begin(); it != m_ProcessingChunks.end();) {
-    TaskResult &result = it->second;
-
+  // Promotion, as a traversal that is told whether to keep each entry. The old
+  // loop promoted or dropped entries while iterating a flat map and reassigning
+  // its iterator; a callback states the same thing without an iterator that
+  // erase() could invalidate mid-walk, and without the tree having to keep a
+  // begin()/end() pair stable across a mutation.
+  //
+  // Returning false erases the entry. The octree defers the free until the walk
+  // has finished, so nothing it is standing on is released underneath it.
+  m_ProcessingChunks.forEachEntry([&](const glm::ivec2 &position,
+                                      TaskResult &result) -> bool {
     // GPU path: the meshing task only flags meshReady. Before promoting,
     // finish the deferred heightmap readback for this chunk's SSBO slot.
     // By now the compute dispatch is at least a frame old, so the GPU has
@@ -129,8 +165,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     if (Constants::Noise::USE_GPU && m_HeightMapSSBO &&
         m_ComputeShader.getId() != 0) {
       if (!result.meshReady.load(std::memory_order_acquire)) {
-        ++it;
-        continue;
+        return true;
       }
       if (!result.chunk.isGpuHeightMapReady()) {
         m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
@@ -151,8 +186,6 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       }
     }
 
-    const glm::ivec2 position = it->first;
-
     // Reap a chunk whose meshing threw. This has to come *before* the
     // uploadReady check, because a task that threw never sets uploadReady --
     // so without this the entry sits in m_ProcessingChunks forever, its
@@ -167,22 +200,18 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
         m_GpuSlots.release(result.slot);
         result.slot = TaskResult::kNoGpuSlot;
       }
-      {
-        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
-        m_ProcessingPositions.erase(position);
-        it = m_ProcessingChunks.erase(it);
-      }
-      continue;
+      std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+      m_ProcessingPositions.erase(position);
+      return false;
     }
 
     if (!result.uploadReady.load(std::memory_order_acquire)) {
-      ++it;
-      continue;
+      return true;
     }
 
     // Range-check before uploading: if the camera has moved away since this
     // task was enqueued, discard the chunk here instead of paying the GPU
-    // upload cost. This is only safe now that uploadReady is set — it is the
+    // upload cost. This is only safe now that uploadReady is set -- it is the
     // worker's final action, so no task can still be touching `result`.
     // Erasing earlier would leave the worker meshing into freed memory.
     if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
@@ -195,12 +224,9 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
         m_GpuSlots.release(result.slot);
         result.slot = TaskResult::kNoGpuSlot;
       }
-      {
-        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
-        m_ProcessingPositions.erase(position);
-        it = m_ProcessingChunks.erase(it);
-      }
-      continue;
+      std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+      m_ProcessingPositions.erase(position);
+      return false;
     }
 
     result.chunk.pass();
@@ -209,131 +235,163 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     {
       std::lock_guard<std::mutex> lock(m_ProcessingMutex);
       m_ProcessingPositions.erase(position);
-      it = m_ProcessingChunks.erase(it);
     }
-
-    m_ProcessedChunks.try_emplace(position, std::move(promoted));
-  }
+    // Do NOT erase from m_ProcessingChunks here. Returning false is what tells
+    // forEachEntry to drop the entry, and it does the bookkeeping exactly once.
+    // Erasing as well would decrement the entry count twice for one removal.
+    m_ProcessedChunks.emplace(position, std::move(promoted));
+    return false;
+  });
 
   // Streaming window origin. The chunk the camera is *inside*, which is an
   // index of containment and takes no half-chunk bias (#132).
   const int32_t currentChunkX = ChunkGrid::chunkIndexFor(cameraPosition.x);
   const int32_t currentChunkZ = ChunkGrid::chunkIndexFor(cameraPosition.z);
 
-  for (int32_t chunkX = currentChunkX - Constants::Chunk::RENDER_DISTANCE_CHUNKS;
-       chunkX <= currentChunkX + Constants::Chunk::RENDER_DISTANCE_CHUNKS;
-       chunkX++) {
-    for (int32_t chunkZ = currentChunkZ - Constants::Chunk::RENDER_DISTANCE_CHUNKS;
-         chunkZ <= currentChunkZ + Constants::Chunk::RENDER_DISTANCE_CHUNKS;
-         chunkZ++) {
-      const glm::ivec2 position = {chunkX, chunkZ};
+  // Spawn scan. The old form was an unconditional double loop over
+  // (2 * RENDER_DISTANCE_CHUNKS + 1)^2 = 4225 grid positions, every frame,
+  // whether or not the player had moved: one getChunkDistanceSquared call, one
+  // lock_guard on m_ProcessingMutex and two hash lookups per position, to
+  // discover that the positions already had chunks.
+  //
+  // The tree makes the same question cheap in both directions. A cell whose
+  // chunks are all resident is skipped whole. A cell with no subtree at all is
+  // reported once for the whole cell rather than 4^level times, which is what
+  // makes a cold start cheaper than the loop it replaces rather than dearer.
+  //
+  // The distance test is unchanged and still runs per chunk, so which chunks
+  // get enqueued is exactly the same set as before. Only the cost of finding
+  // out is different.
+  const glm::ivec2 windowLo{currentChunkX - Constants::Chunk::RENDER_DISTANCE_CHUNKS,
+                            currentChunkZ - Constants::Chunk::RENDER_DISTANCE_CHUNKS};
+  const glm::ivec2 windowHi{currentChunkX + Constants::Chunk::RENDER_DISTANCE_CHUNKS + 1,
+                            currentChunkZ + Constants::Chunk::RENDER_DISTANCE_CHUNKS + 1};
 
-      if (getChunkDistanceSquared(position, cameraPosition) > renderDistSq) {
-        continue;
-      }
+  m_ProcessedChunks.forEachCellIn(
+      windowLo, windowHi,
+      [](int level, const glm::ivec2 &, const ChunkOctree<Chunk>::Node *node) {
+        return (node != nullptr && node->complete)
+                   ? ChunkOctree<Chunk>::Action::Skip
+                   : ChunkOctree<Chunk>::Action::Descend;
+      },
+      [&](int level, const glm::ivec2 &cellOrigin, const Chunk *) {
+        // A whole-cell report means every chunk in it needs streaming. Expand it
+        // to individual chunks -- clipped to the window, because the cell grid
+        // and the window do not line up and enqueueing outside the window would
+        // be terrain the render distance does not ask for.
+        const int side = 1 << level;
+        const int loX = std::max(cellOrigin.x, windowLo.x);
+        const int loZ = std::max(cellOrigin.y, windowLo.y);
+        const int hiX = std::min(cellOrigin.x + side, windowHi.x);
+        const int hiZ = std::min(cellOrigin.y + side, windowHi.y);
+        for (int32_t chunkX = loX; chunkX < hiX; ++chunkX) {
+          for (int32_t chunkZ = loZ; chunkZ < hiZ; ++chunkZ) {
+            const glm::ivec2 position{chunkX, chunkZ};
 
-      TaskResult *resultPtr = nullptr;
-      {
-        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
-        if (m_ProcessedChunks.contains(position)) {
-          continue;
-        }
-        if (m_ProcessingPositions.contains(position)) {
-          continue;
-        }
-        m_ProcessingPositions.insert(position);
-        auto [it, inserted] = m_ProcessingChunks.try_emplace(position, m_Renderer);
-        resultPtr = &it->second;
-      }
+            if (getChunkDistanceSquared(position, cameraPosition) >
+                renderDistSq) {
+              continue;
+            }
 
-      TaskResult &result = *resultPtr;
-      const bool enqueued = [&] {
-        if (Constants::Noise::USE_GPU && m_HeightMapSSBO &&
-            m_ComputeShader.getId() != 0) {
-          // Batched GPU path: dispatch into a free slot of the shared SSBO
-          // and defer both meshing and readback. The main thread never
-          // blocks on a per-chunk GPU sync here; the readback happens
-          // later, once the slot has been given a full frame to complete.
-          //
-          // A slot is only taken if one is free. The previous code used
-          // `m_NextGpuSlot++ % kGpuSlots`, which handed out slots that were
-          // still in flight: one frame dispatches up to kMaxPendingTasks
-          // chunks, so all 64 slots were overwritten 16x before the first
-          // readback, and every chunk was meshed from whichever chunk had
-          // been dispatched last (#126). With the slots exhausted, fall
-          // through to the CPU path below for this position rather than
-          // corrupting the terrain.
-          if (const auto slot = m_GpuSlots.acquire()) {
-            result.slot = *slot;
-            m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
-            result.chunk.generateHeightMapGPU(position, *slot, m_ComputeShader);
-            return m_ThreadPool.tryEnqueue(
-                [&result]() {
-                  result.meshReady.store(true, std::memory_order_release);
-                },
-                kMaxPendingTasks);
+            TaskResult *resultPtr = nullptr;
+            {
+              std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+              if (m_ProcessedChunks.contains(position)) {
+                continue;
+              }
+              if (m_ProcessingPositions.contains(position)) {
+                continue;
+              }
+              m_ProcessingPositions.insert(position);
+              resultPtr = m_ProcessingChunks.emplace(position, m_Renderer);
+            }
+
+            TaskResult &result = *resultPtr;
+            const bool enqueued = [&] {
+              if (Constants::Noise::USE_GPU && m_HeightMapSSBO &&
+                  m_ComputeShader.getId() != 0) {
+                // Batched GPU path: dispatch into a free slot of the shared SSBO
+                // and defer both meshing and readback. The main thread never
+                // blocks on a per-chunk GPU sync here; the readback happens
+                // later, once the slot has been given a full frame to complete.
+                //
+                // A slot is only taken if one is free. The previous code used
+                // `m_NextGpuSlot++ % kGpuSlots`, which handed out slots that were
+                // still in flight: one frame dispatches up to kMaxPendingTasks
+                // chunks, so all 64 slots were overwritten 16x before the first
+                // readback, and every chunk was meshed from whichever chunk had
+                // been dispatched last (#126). With the slots exhausted, fall
+                // through to the CPU path below for this position rather than
+                // corrupting the terrain.
+                if (const auto slot = m_GpuSlots.acquire()) {
+                  result.slot = *slot;
+                  m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
+                  result.chunk.generateHeightMapGPU(position, *slot, m_ComputeShader);
+                  return m_ThreadPool.tryEnqueue(
+                      [&result]() {
+                        result.meshReady.store(true, std::memory_order_release);
+                      },
+                      kMaxPendingTasks);
+                }
+              }
+
+              return m_ThreadPool.tryEnqueue(
+                  [&result, position]() {
+                    // The pool itself now guarantees an exception cannot escape
+                    // a worker, but only this task body knows *which* chunk
+                    // failed -- without that the promotion loop would wait on
+                    // uploadReady for a chunk that is never coming, stranding
+                    // its position forever (#141).
+                    try {
+                      result.chunk.generateMeshData(position);
+                      result.uploadReady.store(true, std::memory_order_release);
+                    } catch (const std::exception &e) {
+                      std::println(stderr,
+                                   "ChunkManager: meshing ({}, {}) failed: {}",
+                                   position.x, position.y, e.what());
+                      result.failed.store(true, std::memory_order_release);
+                    } catch (...) {
+                      std::println(stderr,
+                                   "ChunkManager: meshing ({}, {}) failed",
+                                   position.x, position.y);
+                      result.failed.store(true, std::memory_order_release);
+                    }
+                  },
+                  kMaxPendingTasks);
+            }();
+
+            if (!enqueued) {
+              // The pool is at its backlog cap. Drop the placeholder entry so
+              // the chunk is retried on a later frame; leaving it in place would
+              // strand the position in m_ProcessingPositions forever, since
+              // nothing will ever flag the chunk ready. Safe to erase now
+              // precisely because no task was queued and therefore none holds a
+              // reference to `result`.
+              //
+              // The GPU slot has already been taken and the compute dispatch
+              // has already been issued, but nothing will ever read it back now,
+              // so it has to be released here too. Without this the pool's
+              // backlog cap leaks slots, and after 64 such frames the GPU path
+              // is disabled for the rest of the session.
+              if (result.slot != TaskResult::kNoGpuSlot) {
+                m_GpuSlots.release(result.slot);
+                result.slot = TaskResult::kNoGpuSlot;
+              }
+              std::lock_guard<std::mutex> lock(m_ProcessingMutex);
+              m_ProcessingChunks.erase(position);
+              m_ProcessingPositions.erase(position);
+            }
           }
         }
-
-        return m_ThreadPool.tryEnqueue(
-            [&result, position]() {
-              // The pool itself now guarantees an exception cannot escape a
-              // worker, but only this task body knows *which* chunk failed --
-              // without that the promotion loop would wait on uploadReady for
-              // a chunk that is never coming, stranding its position forever
-              // (#141).
-              try {
-                result.chunk.generateMeshData(position);
-                result.uploadReady.store(true, std::memory_order_release);
-              } catch (const std::exception &e) {
-                std::println(stderr,
-                             "ChunkManager: meshing ({}, {}) failed: {}",
-                             position.x, position.y, e.what());
-                result.failed.store(true, std::memory_order_release);
-              } catch (...) {
-                std::println(stderr,
-                             "ChunkManager: meshing ({}, {}) failed",
-                             position.x, position.y);
-                result.failed.store(true, std::memory_order_release);
-              }
-            },
-            kMaxPendingTasks);
-      }();
-
-      if (!enqueued) {
-        // The pool is at its backlog cap. Drop the placeholder entry so the
-        // chunk is retried on a later frame; leaving it in place would strand
-        // the position in m_ProcessingPositions forever, since nothing will
-        // ever flag the chunk ready. Safe to erase now precisely because no
-        // task was queued and therefore none holds a reference to `result`.
-        //
-        // The GPU slot has already been taken and the compute dispatch has
-        // already been issued, but nothing will ever read it back now, so it
-        // has to be released here too. Without this the pool's backlog cap
-        // leaks slots, and after 64 such frames the GPU path is disabled for
-        // the rest of the session.
-        if (result.slot != TaskResult::kNoGpuSlot) {
-          m_GpuSlots.release(result.slot);
-          result.slot = TaskResult::kNoGpuSlot;
-        }
-        std::lock_guard<std::mutex> lock(m_ProcessingMutex);
-        m_ProcessingChunks.erase(position);
-        m_ProcessingPositions.erase(position);
-      }
-    }
-  }
+      });
 
   shader.use();
   Frustum frustum(camera);
 
-  for (auto &value : m_ProcessedChunks) {
-    const glm::ivec2 &position = value.first;
-
+  m_ProcessedChunks.forEachValue([&](const glm::ivec2 &position, Chunk &chunk) {
     if (!frustum.isChunkInside(position)) {
-      continue;
+      return;
     }
-
-    Chunk &chunk = value.second;
 
     glm::mat4 model = glm::mat4(1.0f);
     model = glm::translate(
@@ -347,7 +405,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     shader.use();
     shader.setUniformMat4("uModel", model);
     chunk.render();
-  }
+  });
 }
 
 bool ChunkManager::tryGetGroundHeight(const glm::vec3 &cameraPosition,
@@ -374,10 +432,16 @@ bool ChunkManager::tryGetGroundHeight(const glm::vec3 &cameraPosition,
   assert(localX >= 0 && localX < Constants::Chunk::LENGTH);
   assert(localZ >= 0 && localZ < Constants::Chunk::LENGTH);
 
-  // One lookup rather than contains() followed by at(), which hashes and
-  // probes twice to reach the same entry.
-  const auto it = m_ProcessedChunks.find(chunkPosition);
-  if (it == m_ProcessedChunks.end()) {
+  // One descent rather than contains() followed by at(), which would walk the
+  // tree twice to reach the same node.
+  //
+  // This is on the player/collision path, so it is the one place the octree is
+  // a straight cost rather than a saving: locate is a fixed
+  // kSubtreeLevels + 1 = 7 dependent hops, where the flat map's find was one
+  // hash and one bucket walk. Bounded and small, but not free -- noted in
+  // src/chunk_octree.h rather than left to be discovered.
+  const Chunk *chunk = m_ProcessedChunks.find(chunkPosition);
+  if (chunk == nullptr) {
     // Not yet streamed in. Report nothing rather than a height: the player
     // should keep falling until the chunk arrives, not be placed on a floor
     // that is not there (#133). outHeight is deliberately left untouched.
@@ -391,7 +455,7 @@ bool ChunkManager::tryGetGroundHeight(const glm::vec3 &cameraPosition,
   // to 45 blocks below the surface they are actually looking at (#134).
   // Constants::Chunk::walkableSurfaceY is the same predicate the mesher uses,
   // so the two cannot drift.
-  outHeight = Constants::Chunk::walkableSurfaceY(it->second.getHighestBlockY(
+  outHeight = Constants::Chunk::walkableSurfaceY(chunk->getHighestBlockY(
       static_cast<uint32_t>(localX), static_cast<uint32_t>(localZ)));
   return true;
 }

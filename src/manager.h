@@ -12,6 +12,7 @@
 
 #include "camera.h"
 #include "chunk.h"
+#include "chunk_octree.h"
 #include "gpu_slot_pool.h"
 #include "shader.h"
 #include "threadpool.h"
@@ -149,10 +150,31 @@ private:
   // that miss the cap are retried on a later frame.
   static constexpr std::size_t kMaxPendingTasks = 1024;
 
-  std::unordered_map<glm::ivec2, Chunk> m_ProcessedChunks;
+  // Chunk storage, as a sparse quadtree keyed on chunk coordinates rather than
+  // a flat hash map (#6). The map had no spatial structure, so the per-frame
+  // spawn scan could only answer "which chunks are near the camera" by
+  // visiting every one of the (2 * RENDER_DISTANCE_CHUNKS + 1)^2 = 4225 grid
+  // positions, every frame. The tree answers it with a descent that skips a
+  // cell whose chunks are all resident, or reports a cell with no chunks in it
+  // as a single fact.
+  //
+  // The interface deliberately matches the unordered_map it replaced --
+  // contains/find/emplace/erase, forEachValue in place of iteration -- so this
+  // is a change of container rather than a rewrite of every loop above. See
+  // src/chunk_octree.h for the full mapping.
+  ChunkOctree<Chunk> m_ProcessedChunks;
+
+  // Positions with a meshing task in flight. Still a flat set, and deliberately
+  // so: it is a membership guard, not a spatial index, and the octree stores the
+  // task itself. Consolidating these two into one structure is #52 and is
+  // tracked there, not here.
   std::unordered_set<glm::ivec2> m_ProcessingPositions;
 
-  std::unordered_map<glm::ivec2, TaskResult> m_ProcessingChunks;
+  // In-flight work, as a tree for the same reason as m_ProcessedChunks: it is
+  // walked in full each frame by the promotion pass and pruned by the discard
+  // paths, and it needs the same stable-address guarantee for TaskResult, which
+  // a worker thread holds a reference to across frames.
+  ChunkOctree<TaskResult> m_ProcessingChunks;
   std::mutex m_ProcessingMutex;
   ThreadPool m_ThreadPool;
 };
