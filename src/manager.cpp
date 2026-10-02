@@ -12,6 +12,7 @@
 #include "chunk_coords.h"
 #include "config.h"
 #include "frustum.h"
+#include "level_of_detail.h"
 #include "renderer/renderer.hpp"
 #include "shader.h"
 
@@ -148,6 +149,29 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       },
       [](Chunk &chunk) { chunk.cleanup(); });
 
+  // LOD management: retire a resident chunk whose tier has moved on, so the
+  // spawn scan below re-requests it at the new stride.
+  //
+  // This is where the hysteresis is actually applied. Lod::selectTier needs the
+  // tier the chunk is AT, which is why Chunk carries its stride; asking only
+  // "what tier does this distance map to" would re-mesh a chunk on every frame
+  // the camera sits on a tier boundary, and each of those is both a stream of
+  // work and a visible pop.
+  m_ProcessedChunks.forEachEntry([&](const glm::ivec2 &position,
+                                      Chunk &chunk) -> bool {
+    const float distance =
+        std::sqrt(getChunkDistanceSquared(position, cameraPosition));
+    const Lod::Tier current = Lod::tierForStep(chunk.lodStep());
+    if (Lod::selectTier(distance, current) == current) {
+      return true;
+    }
+    // Tier changed: drop the mesh and let the spawn scan queue a fresh one at
+    // the new stride. cleanup() before the drop, while the GL objects are still
+    // reachable.
+    chunk.cleanup();
+    return false;
+  });
+
   // Promotion, as a traversal that is told whether to keep each entry. The old
   // loop promoted or dropped entries while iterating a flat map and reassigning
   // its iterator; a callback states the same thing without an iterator that
@@ -170,7 +194,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
       if (!result.chunk.isGpuHeightMapReady()) {
         m_ComputeShader.bindBufferBase(*m_HeightMapSSBO, 0);
         result.chunk.finishHeightMapGPU(result.slot, *m_HeightMapSSBO);
-        result.chunk.generateMesh();
+        result.chunk.generateMesh(result.lodStep);
         // The slot's contents have now been consumed, so it can serve another
         // dispatch. Releasing it here rather than at dispatch time is what
         // makes the slot's lifetime exactly one readback (#126).
@@ -239,6 +263,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     // Do NOT erase from m_ProcessingChunks here. Returning false is what tells
     // forEachEntry to drop the entry, and it does the bookkeeping exactly once.
     // Erasing as well would decrement the entry count twice for one removal.
+    promoted.setLodStep(result.lodStep);
     m_ProcessedChunks.emplace(position, std::move(promoted));
     return false;
   });
@@ -307,6 +332,21 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
             }
 
             TaskResult &result = *resultPtr;
+            // The LOD stride is chosen ONCE, when the chunk is enqueued, and
+            // carried with the task. It is deliberately not re-evaluated while
+            // the chunk is in flight: a worker holds a reference to `result`
+            // across frames, and rewriting the stride under it would change what
+            // the mesher is emitting half way through.
+            // Tier comes from the raw distance here, not from selectTier: a
+            // chunk being (re-)requested has no current tier, because the LOD
+            // pass above has just retired the old mesh if the tier had moved.
+            // The hysteresis has already done its job by keeping the chunk
+            // resident until that point; asking for a tier from scratch here is
+            // exactly right.
+            result.lodStep = static_cast<std::uint32_t>(
+                Lod::sampleTierForDistance(
+                    std::sqrt(getChunkDistanceSquared(position,
+                                                      cameraPosition))));
             const bool enqueued = [&] {
               if (Constants::Noise::USE_GPU && m_HeightMapSSBO &&
                   m_ComputeShader.getId() != 0) {
@@ -343,7 +383,7 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
                     // uploadReady for a chunk that is never coming, stranding
                     // its position forever (#141).
                     try {
-                      result.chunk.generateMeshData(position);
+                      result.chunk.generateMeshData(position, result.lodStep);
                       result.uploadReady.store(true, std::memory_order_release);
                     } catch (const std::exception &e) {
                       std::println(stderr,
@@ -387,6 +427,29 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
 
   shader.use();
   Frustum frustum(camera);
+
+  // LOD management: retire a resident chunk whose tier has moved on, so the
+  // spawn scan below re-requests it at the new stride.
+  //
+  // This is where the hysteresis is actually applied. Lod::selectTier needs the
+  // tier the chunk is AT, which is why Chunk carries its stride; asking only
+  // "what tier does this distance map to" would re-mesh a chunk on every frame
+  // the camera sits on a tier boundary, and each of those is both a stream of
+  // work and a visible pop.
+  m_ProcessedChunks.forEachEntry([&](const glm::ivec2 &position,
+                                      Chunk &chunk) -> bool {
+    const float distance =
+        std::sqrt(getChunkDistanceSquared(position, cameraPosition));
+    const Lod::Tier current = Lod::tierForStep(chunk.lodStep());
+    if (Lod::selectTier(distance, current) == current) {
+      return true;
+    }
+    // Tier changed: drop the mesh and let the spawn scan queue a fresh one at
+    // the new stride. cleanup() before the drop, while the GL objects are still
+    // reachable.
+    chunk.cleanup();
+    return false;
+  });
 
   m_ProcessedChunks.forEachValue([&](const glm::ivec2 &position, Chunk &chunk) {
     if (!frustum.isChunkInside(position)) {

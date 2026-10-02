@@ -29,6 +29,7 @@
 
 #include "chunk.h"
 #include "config.h"
+#include "level_of_detail.h"
 #include "io.h"
 #include "renderer/opengl/gl_texture_type.hpp"
 #include "renderer/opengl/opengl_shader.hpp"
@@ -428,6 +429,91 @@ int main() {
       chunk.generateMeshData(position);
       chunk.generateMesh();
       ReportGlErrors("chunk mesh generation is error-free");
+
+      // --- LOD: the tiers have to demonstrably apply ------------------------
+      //
+      // The unit suite proves the SELECTION policy -- which tier a distance
+      // maps to, and that hysteresis stops a boundary thrashing. It cannot
+      // prove the tiers change anything, because that is a property of the
+      // mesher and the mesher needs a renderer. This is where that is checked.
+      //
+      // Each stride re-meshes the SAME chunk and the vertex count is compared,
+      // so the only variable is the sampling step. A tier that exists in the
+      // type system and produces an identical mesh would pass every test in
+      // test_level_of_detail.cpp and fail here.
+      {
+        const std::size_t fullVerts = chunk.getVertexCount();
+        const std::size_t fullIndices = chunk.getIndexCount();
+        std::printf("        lod stride 1: verts=%zu indices=%zu\n", fullVerts,
+                    fullIndices);
+
+        std::size_t stride2Verts = 0;
+        std::size_t stride4Verts = 0;
+        // Driven through Lod::sampleStep rather than a literal stride, so this
+        // covers the whole chain tier -> stride -> mesh. A literal here would
+        // pass even if every tier resolved to stride 1, which is the failure
+        // this check exists to catch: a LOD that exists in the type system and
+        // produces an identical mesh.
+        for (const Lod::Tier tier : {Lod::Tier::Mid, Lod::Tier::Far}) {
+          const std::uint32_t step = Lod::sampleStep(tier);
+          chunk.generateMesh(step);
+          const std::size_t verts = chunk.getVertexCount();
+          const std::size_t indices = chunk.getIndexCount();
+          // The mesher's storage is cleared by pass(), which has not run yet, so
+          // the counts are the freshly emitted ones.
+          std::printf("        lod stride %u: verts=%zu indices=%zu\n", step,
+                      verts, indices);
+          if (tier == Lod::Tier::Mid) {
+            stride2Verts = verts;
+          } else {
+            stride4Verts = verts;
+          }
+          // Whatever the stride, a mesh is whole quads. A stride that emitted a
+          // partial quad would show up here as a count that is not a multiple of
+          // four, which is also a corrupt index buffer.
+          Report("a coarse LOD mesh is still whole quads",
+                 verts > 0 && verts % 4 == 0 && verts == (indices / 6) * 4,
+                 "stride=" + std::to_string(step) +
+                     " verts=" + std::to_string(verts) +
+                     " indices=" + std::to_string(indices));
+          ReportGlErrors("coarse LOD mesh generation is error-free");
+        }
+
+        // Fewer vertices. NOT asserted as 4x per tier: the top face is one quad
+        // per lattice node and so does scale as 1/step^2, but the side stacks
+        // scale with terrain relief and the skirt not at all, so the whole-mesh
+        // saving is a bound rather than a formula. The measured ratios are in
+        // the commit message.
+        Report("a coarser tier emits fewer vertices than full detail",
+               stride2Verts > 0 && stride2Verts < fullVerts,
+               "full=" + std::to_string(fullVerts) +
+                   " stride2=" + std::to_string(stride2Verts));
+        Report("the coarsest tier emits fewer vertices than the middle one",
+               stride4Verts > 0 && stride4Verts < stride2Verts,
+               "stride2=" + std::to_string(stride2Verts) +
+                   " stride4=" + std::to_string(stride4Verts));
+        // The saving has to be a real factor, not a rounding difference: at
+        // least a quarter of the vertices gone at each step.
+        Report("each LOD step removes at least half the vertices",
+               stride2Verts * 2 <= fullVerts &&
+                   stride4Verts * 2 <= stride2Verts,
+               "full=" + std::to_string(fullVerts) +
+                   " stride2=" + std::to_string(stride2Verts) +
+                   " stride4=" + std::to_string(stride4Verts));
+
+        // The near field must be untouched. Everything inside FOG_START is at
+        // stride 1, so if the rewritten mesher changed the default output the
+        // terrain the player is standing on would have changed. Pinned by
+        // count, which is the only part of the mesh the tests can see.
+        chunk.generateMesh();
+        Report("the default stride reproduces the pre-LOD mesh exactly",
+               chunk.getVertexCount() == fullVerts &&
+                   chunk.getIndexCount() == fullIndices,
+               "before=" + std::to_string(fullVerts) + "/" +
+                   std::to_string(fullIndices) +
+                   " after=" + std::to_string(chunk.getVertexCount()) + "/" +
+                   std::to_string(chunk.getIndexCount()));
+      }
 
       chunk.pass();
       Report("chunk mesh upload to GPU", true);

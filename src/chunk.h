@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -100,9 +101,15 @@ public:
   Chunk(Chunk &&other) noexcept;
   Chunk &operator=(Chunk &&other) noexcept;
 
-  void generateMeshData(const glm::ivec2 &position);
+  // `sampleStep` is the LOD heightmap stride (Lod::sampleStep): 1 emits the
+  // full 16 x 16 mesh, 2 keeps one column per 2 x 2 block, 4 one per 4 x 4.
+  // Defaulted to 1 so every existing call site is unchanged, and so the near
+  // field -- everything inside FOG_START -- keeps byte-identical output to the
+  // pre-LOD mesher.
+  void generateMeshData(const glm::ivec2 &position,
+                        std::uint32_t sampleStep = 1);
   void generateHeightMapCPU(const glm::ivec2 &position);
-  void generateMesh();
+  void generateMesh(std::uint32_t sampleStep = 1);
 
   /**
    * Stage 1 of the GPU path: dispatch the compute shader into the chunk's
@@ -133,6 +140,16 @@ public:
   void render();
   void cleanup();
 
+  /** The LOD heightmap stride this chunk's mesh was built at.
+   *
+   *  Stored on the chunk, not in a side table, because it is the only record of
+   *  which tier a resident chunk belongs to -- and the LOD rule needs it: the
+   *  hysteresis in Lod::selectTier is a function of the tier a chunk is AT, so
+   *  without this the engine could only ask "what tier is this distance", which
+   *  is the half of the rule that thrashes. */
+  [[nodiscard]] std::uint32_t lodStep() const { return m_LodStep; }
+  void setLodStep(std::uint32_t step) { m_LodStep = step; }
+
   /** Moved-from state: a moved-from Chunk is valid but empty —
    *  m_Renderer is nullptr, GPU resources (VBO/EBO/VAO) and mesh data
    *  (m_Data/m_Indices) are transferred to the destination, size/count
@@ -151,6 +168,18 @@ public:
 
   static constexpr uint32_t kExtSide =
       static_cast<uint32_t>(Constants::Chunk::LENGTH) + 2u;
+
+  /** Lattice nodes per axis for a sampling stride.
+   *
+   *  LENGTH must be divisible by the stride, so every tier's lattice tiles the
+   *  chunk exactly. Asserted rather than rounded: a partial lattice block at the
+   *  chunk edge would need a second quad width, and a silently wrong node count
+   *  would show up as missing terrain at the chunk border instead. */
+  [[nodiscard]] static std::uint32_t latticeSide(std::uint32_t sampleStep) {
+    assert(sampleStep >= 1);
+    assert(static_cast<std::uint32_t>(Constants::Chunk::LENGTH) % sampleStep == 0);
+    return static_cast<std::uint32_t>(Constants::Chunk::LENGTH) / sampleStep;
+  }
 
 private:
   void resetMovedFrom(Chunk &other) noexcept;
@@ -183,6 +212,11 @@ private:
 
   /** True after the deferred GPU readback has filled the height maps. */
   bool m_GpuHeightMapReady = false;
+
+  // Which LOD tier's mesh this chunk holds. 1 = full detail. Carried across
+  // moves, so a chunk keeps its tier until it travels a full chunk's width past
+  // the boundary rather than changing tier on the frame the camera crosses it.
+  std::uint32_t m_LodStep = 1;
 
   /**
    * Scratch for the GPU heightmap readback, kept as a member so the

@@ -35,6 +35,10 @@ struct TaskResult {
   // is dropped before it is ever read back.
   static constexpr uint32_t kNoGpuSlot = 0xFFFFFFFFu;
   uint32_t slot = kNoGpuSlot;
+  // The LOD heightmap stride this chunk was enqueued with (Lod::sampleStep).
+  // Fixed at enqueue time and never changed while the task is in flight, so the
+  // stride a worker is meshing at cannot shift underneath it.
+  std::uint32_t lodStep = 1;
 
   TaskResult() = delete;
   explicit TaskResult(IRenderer* renderer) : chunk(renderer) {}
@@ -45,7 +49,8 @@ struct TaskResult {
         uploadReady(
             other.uploadReady.load(std::memory_order_relaxed)),
         failed(other.failed.load(std::memory_order_relaxed)),
-        slot(other.slot) {}
+        slot(other.slot),
+        lodStep(other.lodStep) {}
 
   TaskResult &operator=(TaskResult &&other) noexcept {
     if (this != &other) {
@@ -59,6 +64,7 @@ struct TaskResult {
       failed.store(other.failed.load(std::memory_order_relaxed),
                    std::memory_order_relaxed);
       slot = other.slot;
+      lodStep = other.lodStep;
     }
     return *this;
   }

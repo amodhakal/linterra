@@ -148,9 +148,10 @@ void Chunk::finishHeightMapGPU(uint32_t slotOffset, IBuffer &ssbo) {
   m_GpuHeightMapReady = true;
 }
 
-void Chunk::generateMeshData(const glm::ivec2 &position) {
+void Chunk::generateMeshData(const glm::ivec2 &position,
+                             std::uint32_t sampleStep) {
   generateHeightMapCPU(position);
-  generateMesh();
+  generateMesh(sampleStep);
 }
 
 void Chunk::generateHeightMapCPU(const glm::ivec2 &position) {
@@ -180,10 +181,67 @@ void Chunk::generateHeightMapCPU(const glm::ivec2 &position) {
   }
 }
 
-void Chunk::generateMesh() {
+void Chunk::generateMesh(std::uint32_t sampleStep) {
+  // The LOD stride. 1 is the original full-resolution mesher and must produce
+  // byte-identical output, because everything inside FOG_START -- the whole
+  // visible foreground -- is at stride 1 and a regression there would be a
+  // regression in the terrain the player is standing on. The stride divides
+  // LENGTH exactly, so no lattice block is ever partial.
+  const auto step = static_cast<int32_t>(sampleStep);
   const int32_t BX = Constants::Chunk::LENGTH;
   const size_t BY = static_cast<size_t>(Constants::Chunk::HEIGHT);
   const int32_t BZ = Constants::Chunk::LENGTH;
+  // Lattice nodes per axis. At step 1 this is 16, the column count the
+  // original mesher walked, and every node maps to exactly one column.
+  const int32_t NX = latticeSide(sampleStep);
+  const int32_t NZ = latticeSide(sampleStep);
+
+  // Lattice height at a node: the MAXIMUM over the step x step block of columns
+  // the node stands for.
+  //
+  // Max, not min or mean, and the reason is holes. A coarse node whose surface
+  // sat below the true surface would let the neighbouring finer node's side face
+  // be drawn where it should be hidden, and -- worse -- a coarse node lower than
+  // its neighbour leaves a gap between the two chunk meshes along the seam.
+  // Taking the max means a coarse surface is never below anything it covers, so
+  // a step-2 chunk always hides the terrain a step-1 chunk would have shown
+  // underneath it. It can over-represent a peak by up to one block, which fog
+  // covers at the distances these tiers apply at.
+  auto latticeHeight = [&](int32_t nx, int32_t nz) -> uint16_t {
+    uint16_t highest = 0;
+    for (int32_t x = nx * step; x < nx * step + step; ++x) {
+      for (int32_t z = nz * step; z < nz * step + step; ++z) {
+        highest = std::max(highest, m_HeightMap[x][z]);
+      }
+    }
+    return highest;
+  };
+
+  // Skirt depth for this chunk's border faces.
+  //
+  // A chunk at stride 2 and its neighbour at stride 4 sample different
+  // lattices, so along the seam between them the two surfaces are not the same
+  // polygon and a crack opens wherever the coarse side is lower. Extruding the
+  // chunk's outer border straight down by at least the chunk's own height range
+  // closes it: the two skirts overlap for at least the full relief of the
+  // terrain, so no gap can show through.
+  //
+  // The relief, not a constant, because a constant small enough to be
+  // unobtrusive on flat ground is far too small next to a cliff, and a constant
+  // large enough for a cliff is a wall of geometry hanging off every flat
+  // chunk. Capped at MAX_BLOCK_HEIGHT so it cannot run away.
+  uint16_t chunkMinHeight = 0xFFFF;
+  uint16_t chunkMaxHeight = 0;
+  for (int32_t x = 0; x < BX; ++x) {
+    for (int32_t z = 0; z < BZ; ++z) {
+      chunkMinHeight = std::min(chunkMinHeight, m_HeightMap[x][z]);
+      chunkMaxHeight = std::max(chunkMaxHeight, m_HeightMap[x][z]);
+    }
+  }
+  const int32_t relief = static_cast<int32_t>(chunkMaxHeight) -
+                         static_cast<int32_t>(chunkMinHeight);
+  const int32_t skirt = std::min(relief, static_cast<int32_t>(
+                                              Constants::Chunk::MAX_BLOCK_HEIGHT)) + 1;
 
   m_Data.clear();
   m_Indices.clear();
@@ -205,12 +263,16 @@ void Chunk::generateMesh() {
   // heights, not by the volume, so reserve from that instead. Over-reserving
   // costs one allocation of capacity; under-reserving costs a geometric
   // reallocation, which is the thing being avoided.
-  const size_t columns = static_cast<size_t>(BX) * static_cast<size_t>(BZ);
+  // Scoped to the lattice, not the chunk: at stride 4 a chunk emits 16 columns
+  // worth of quads, and reserving for 256 would allocate 16x the memory for every
+  // in-flight chunk (up to kMaxPendingTasks of them) to hold a mesh that is
+  // 16x smaller. The skirt needs room too, hence the explicit term.
+  const size_t columns = static_cast<size_t>(NX) * static_cast<size_t>(NZ);
   // Top + bottom per column, plus a margin for side faces on uneven terrain,
   // plus a floor so a flat world does not reserve almost nothing and then
-  // grow anyway.
+  // grow anyway. Four extra columns' worth covers the chunk's four skirt faces.
   constexpr size_t kQuadsPerColumn = 8;
-  const size_t reserveQuads = columns * kQuadsPerColumn + columns;
+  const size_t reserveQuads = columns * kQuadsPerColumn + columns + 4;
   m_Data.reserve(reserveQuads * 4);
   m_Indices.reserve(reserveQuads * 6);
 
@@ -292,104 +354,127 @@ void Chunk::generateMesh() {
     m_Indices.push_back(b3);
   };
 
-  auto isBlockExposed = [&](int32_t x, int32_t y, int32_t z, int32_t dir) -> bool {
-    int32_t nx = x, ny = y, nz = z;
+  // Neighbour node height in one of the four horizontal directions, or the
+  // extended heightmap's value where the neighbour is outside this chunk.
+  //
+  // Outside the chunk the halo is read at FULL resolution and maxed over the
+  // step columns, because the neighbour chunk is free to be at a different
+  // stride: its border is a fine column whatever this chunk's lattice says, and
+  // sampling the halo at this chunk's stride would lose the peak that decides
+  // whether a side face is needed at all.
+  auto neighbourHeight = [&](int32_t nx, int32_t nz, int dir) -> uint16_t {
+    int32_t fx = nx * step;
+    int32_t fz = nz * step;
     switch (dir) {
-    case 0:
-      nx = x + 1;
+    case 0: // +X
+      ++nx;
+      if (nx < NX) {
+        return latticeHeight(nx, nz);
+      }
+      fx = BX;
       break;
-    case 1:
-      nx = x - 1;
+    case 1: // -X
+      --nx;
+      if (nx >= 0) {
+        return latticeHeight(nx, nz);
+      }
+      fx = -1;
       break;
-    case 2:
-      ny = y + 1;
+    case 4: // +Z
+      ++nz;
+      if (nz < NZ) {
+        return latticeHeight(nx, nz);
+      }
+      fz = BZ;
       break;
-    case 3:
-      ny = y - 1;
-      break;
-    case 4:
-      nz = z + 1;
-      break;
-    case 5:
-      nz = z - 1;
+    default: // -Z
+      --nz;
+      if (nz >= 0) {
+        return latticeHeight(nx, nz);
+      }
+      fz = -1;
       break;
     }
-
-    if (ny < 0 || ny >= static_cast<int32_t>(BY)) {
-      return true;
+    // fx / fz now name a halo column; the other axis walks the node's columns.
+    const uint32_t ex = static_cast<uint32_t>(fx + 1);
+    uint16_t highest = 0;
+    const bool xIsHalo = (fx == -1 || fx == BX);
+    const bool zIsHalo = (fz == -1 || fz == BZ);
+    const int32_t xStart = xIsHalo ? 0 : fx;
+    const int32_t zStart = zIsHalo ? 0 : fz;
+    for (int32_t dx = 0; dx < step; ++dx) {
+      for (int32_t dz = 0; dz < step; ++dz) {
+        const uint32_t hx =
+            xIsHalo ? ex : static_cast<uint32_t>(xStart + dx + 1);
+        const uint32_t hz =
+            zIsHalo ? static_cast<uint32_t>(fz + 1) : static_cast<uint32_t>(zStart + dz + 1);
+        highest = std::max(highest, m_ExtendedHeightMap[hx][hz]);
+      }
     }
-
-    // Halo lookup: local coords in [-1, LENGTH] map to [0, kExtSide).
-    assert(nx >= -1 && nx <= static_cast<int32_t>(Constants::Chunk::LENGTH));
-    assert(nz >= -1 && nz <= static_cast<int32_t>(Constants::Chunk::LENGTH));
-
-    const uint32_t ex = static_cast<uint32_t>(nx + 1);
-    const uint32_t ez = static_cast<uint32_t>(nz + 1);
-    const uint16_t neighborHeight = m_ExtendedHeightMap[ex][ez];
-
-    return static_cast<uint16_t>(ny) >= neighborHeight;
+    return highest;
   };
 
-  for (int32_t x = 0; x < BX; ++x) {
-    for (int32_t z = 0; z < BZ; ++z) {
-      uint16_t height = m_HeightMap[x][z];
-      for (int32_t y = static_cast<int32_t>(height); y >= 0; --y) {
-        bool hasExposedFace = false;
+  for (int32_t nx = 0; nx < NX; ++nx) {
+    for (int32_t nz = 0; nz < NZ; ++nz) {
+      const int32_t x = nx * step;
+      const int32_t z = nz * step;
+      const int32_t height = static_cast<int32_t>(latticeHeight(nx, nz));
 
-        for (int32_t d = 0; d < 6; ++d) {
-          if (!isBlockExposed(x, y, z, d))
-            continue;
-
-          hasExposedFace = true;
-
-          BlockType cur = (y == static_cast<int32_t>(height)) ? BlockType::GRASS
-                                                             : BlockType::DIRT;
-
-          glm::ivec3 a(x, y, z);
-          glm::ivec3 du(0, 0, 0), dv(0, 0, 0);
-          BlockNormal normalId;
-          bool flipV = false;
-
-          switch (d) {
-  case 0:
-    a.x = x + 1;
-    normalId = BlockNormal::RIGHT_LEFT_NORMAL;
-    break;
-          case 1:
-            normalId = BlockNormal::RIGHT_LEFT_NORMAL;
-            break;
-          case 2:
-            a.y = y + 1;
-            normalId = BlockNormal::TOP_NORMAL;
-            break;
-          case 3:
-    if (y == 0)
-      continue;
-    normalId = BlockNormal::BOTTOM_NORMAL;
-    break;
-  case 4:
-    a.z = z + 1;
-    normalId = BlockNormal::FRONT_BACK_NORMAL;
-    break;
-          case 5:
-            normalId = BlockNormal::FRONT_BACK_NORMAL;
-            flipV = true;
-            break;
-          }
-
-          // Edge vectors come from the single winding table so the mesh code
-          // and the test that validates the winding cannot disagree.
-          const FaceWinding winding = faceWindingForDirection(d);
-          du = {winding.duX, winding.duY, winding.duZ};
-          dv = {winding.dvX, winding.dvY, winding.dvZ};
-
-          int32_t texId = blockTextureId(cur, normalId);
-          addQuad(a, du, dv, normalId, texId, flipV);
+      // Horizontal faces. Four directions rather than six: the vertical ones are
+      // emitted once per node instead of once per y level, which is the entire
+      // saving at this level of the hierarchy.
+      //
+      // The side stack runs from the node's own surface down to the neighbour's,
+      // and on the chunk's outer border down past y = 0 to the skirt, so the
+      // seam between chunks at different strides cannot show through.
+      for (const int dir : {0, 1, 4, 5}) {
+        const int32_t neighbour =
+            static_cast<int32_t>(neighbourHeight(nx, nz, dir));
+        const bool onChunkBorder = (dir == 0 && nx == NX - 1) ||
+                                   (dir == 1 && nx == 0) ||
+                                   (dir == 4 && nz == NZ - 1) ||
+                                   (dir == 5 && nz == 0);
+        const int32_t lowest =
+            onChunkBorder ? std::min(-1, neighbour - skirt) : neighbour;
+        if (height <= lowest) {
+          continue;
         }
-
-        if (!hasExposedFace)
-          break;
+        const FaceWinding winding = faceWindingForDirection(dir);
+        const glm::ivec3 du{winding.duX * step, winding.duY * step,
+                            winding.duZ * step};
+        const glm::ivec3 dv{winding.dvX * step, winding.dvY * step,
+                            winding.dvZ * step};
+        glm::ivec3 a(x, height, z);
+        if (dir == 0) {
+          a.x = x + step;
+        } else if (dir == 4) {
+          a.z = z + step;
+        }
+        const bool flipV = dir == 5;
+        // GRASS at the top course of the stack, DIRT below, matching the
+        // per-column mesher this replaces.
+        for (int32_t y = height; y > lowest; --y) {
+          const BlockType cur =
+              (y == height) ? BlockType::GRASS : BlockType::DIRT;
+          addQuad(a, du, dv,
+                  winding.outX > 0 ? BlockNormal::RIGHT_LEFT_NORMAL
+                                   : BlockNormal::FRONT_BACK_NORMAL,
+                  blockTextureId(cur, BlockNormal::TOP_NORMAL), flipV);
+          a.y = y - 1;
+        }
       }
+
+      // Top face: one quad spanning the whole step x step block.
+      addQuad(glm::ivec3(x, height, z), glm::ivec3(step, 0, 0),
+              glm::ivec3(0, 0, step), BlockNormal::TOP_NORMAL,
+              blockTextureId(BlockType::GRASS, BlockNormal::TOP_NORMAL), false);
+
+      // Bottom face at y = 0, as the per-column mesher emitted: one per column,
+      // so one per step x step block here.
+      addQuad(glm::ivec3(x, 0, z), glm::ivec3(step, 0, 0),
+              glm::ivec3(0, 0, step), BlockNormal::BOTTOM_NORMAL,
+              blockTextureId(BlockType::DIRT, BlockNormal::BOTTOM_NORMAL),
+              false);
     }
   }
 
@@ -399,15 +484,23 @@ void Chunk::generateMesh() {
   // added to the SAME mesh as the terrain, so it is drawn by the scene shader
   // with no custom program. Submerged faces are omitted (hidden by the opaque
   // surface above) to keep the mesh thin.
-  for (int32_t x = 0; x < BX; ++x) {
-    for (int32_t z = 0; z < BZ; ++z) {
-      const uint16_t surface = m_HeightMap[x][z];
-      if (surface >= Constants::Chunk::WATER_LEVEL) {
-        continue;  // terrain already at/above the water line: no water here
+  //
+  // A lattice node gets a water quad only when the WHOLE step x step block is
+  // below the line, tested on the block maximum. A partially-submerged node is
+  // left dry rather than being covered by a full-width water quad, because that
+  // quad would be drawn over the part of the block that is above water and
+  // would hide terrain. At stride 1 this is exactly the original per-column
+  // rule; at a coarser stride it under-covers water at the shoreline of a
+  // submerged block, which is only reachable at the distances those tiers
+  // apply at.
+  for (int32_t nx = 0; nx < NX; ++nx) {
+    for (int32_t nz = 0; nz < NZ; ++nz) {
+      if (latticeHeight(nx, nz) >= Constants::Chunk::WATER_LEVEL) {
+        continue;
       }
       const int32_t topY = Constants::Chunk::WATER_LEVEL;
-      glm::ivec3 a(x, topY, z);
-      addQuad(a, {1, 0, 0}, {0, 0, 1}, BlockNormal::TOP_NORMAL,
+      glm::ivec3 a(nx * step, topY, nz * step);
+      addQuad(a, {step, 0, 0}, {0, 0, step}, BlockNormal::TOP_NORMAL,
               static_cast<int32_t>(BlockType::WATER), false);
     }
   }

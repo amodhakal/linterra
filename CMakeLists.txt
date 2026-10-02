@@ -196,6 +196,7 @@ if(BUILD_TESTS)
     tests/test_gpu_slot_pool.cpp
     tests/test_heightmap.cpp
     tests/test_io.cpp
+    tests/test_level_of_detail.cpp
     tests/test_packed_vertex.cpp
     tests/test_player.cpp
     tests/test_shader_uniforms.cpp
