@@ -230,14 +230,36 @@ void Application::update() {
   m_Renderer->swapBuffers();
   m_Renderer->pollEvents();
 
-  // Drain all pending OpenGL errors, printing each with a human-readable
-  // description so the numeric code alone doesn't have to be looked up.
-  for (int drained = 0; drained < 16; ++drained) {
-    std::uint32_t err = m_Renderer->getLastError();
+  // Drain pending GL errors, printing each with a human-readable description
+  // so the numeric code alone doesn't have to be looked up.
+  //
+  // The count is reported rather than silently truncating. GL queues one flag
+  // per raised error and glGetError pops one per call, so a hard cap here
+  // leaves the remainder queued -- and the *next* frame's drain then prints
+  // errors raised by the *previous* frame's calls, after this frame's draws
+  // have already run. The printed error would then provably describe code
+  // that did not run in the frame being reported, which is worse than not
+  // printing at all (#148).
+  //
+  // Say how many were left over so the reader knows the output is truncated
+  // rather than complete. Draining without a bound risks spinning if a driver
+  // misbehaves, so there is one, but it is high enough to clear any realistic
+  // frame and it reports itself instead of quietly corrupting attribution.
+  constexpr int kMaxDrainedErrors = 256;
+  int drained = 0;
+  for (; drained < kMaxDrainedErrors; ++drained) {
+    const std::uint32_t err = m_Renderer->getLastError();
     if (err == 0) {
       break;
     }
     std::println("OpenGL Error: {} ({:#06x})", describeGlError(err), err);
+  }
+  if (drained == kMaxDrainedErrors && m_Renderer->getLastError() != 0) {
+    std::println(
+        "OpenGL Error: more than {} errors pending this frame; the rest were "
+        "not drained. Use GL_DEBUG_OUTPUT for per-call attribution -- this "
+        "loop reports errors after the frame that raised them.",
+        kMaxDrainedErrors);
   }
 
   // The ground may genuinely not be known yet -- the player's own chunk is
