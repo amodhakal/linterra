@@ -451,24 +451,55 @@ void ChunkManager::render(const Camera *camera, Shader &shader) {
     return false;
   });
 
-  m_ProcessedChunks.forEachValue([&](const glm::ivec2 &position, Chunk &chunk) {
-    if (!frustum.isChunkInside(position)) {
-      return;
-    }
+  // Draw, as a hierarchical cull: test a cell against the frustum and skip its
+  // whole subtree if the cell is entirely outside the view cone. The per-chunk
+  // test this replaces cost one AABB test per resident chunk per frame and could
+  // only ever reject one chunk at a time; a 64 x 64 chunk cell that is behind
+  // the camera is now rejected in a single test.
+  //
+  // Conservative, and that is the whole safety argument. A cell is dropped only
+  // when all eight of its corners are outside the same plane, so a cell that
+  // straddles the view boundary is kept and descended into. Anything the
+  // projection puts on screen therefore survives both the cell test and the
+  // leaf test, which is the property tests/test_frustum.cpp checks against the
+  // real projection and tests/test_hierarchical_cull.cpp checks for this walk.
+  //
+  // The SAME predicate call at level 0 is the per-chunk test the old draw loop
+  // did, box for box: at level 0 the side is 1 * LENGTH, so the cell box is
+  // exactly Frustum::isChunkInside's box. Nothing is skipped for being in a
+  // tree; a chunk is drawn precisely when the old code would have drawn it, and
+  // the only difference is how many chunks were tested to find that out.
+  m_ProcessedChunks.forEachValuePruned(
+      [&](int level, const glm::ivec2 &origin) {
+        const float side = static_cast<float>(1 << level) *
+                           static_cast<float>(Constants::Chunk::LENGTH);
+        return frustum.isBoundsInside(
+            {static_cast<float>(origin.x) *
+                 static_cast<float>(Constants::Chunk::LENGTH),
+             0.0f,
+             static_cast<float>(origin.y) *
+                 static_cast<float>(Constants::Chunk::LENGTH)},
+            {static_cast<float>(origin.x) *
+                 static_cast<float>(Constants::Chunk::LENGTH) + side,
+             static_cast<float>(Constants::Chunk::HEIGHT),
+             static_cast<float>(origin.y) *
+                 static_cast<float>(Constants::Chunk::LENGTH) + side});
+      },
+      [&](const glm::ivec2 &position, Chunk &chunk) {
+        glm::mat4 model = glm::mat4(1.0f);
+        model = glm::translate(
+            model,
+            glm::vec3(
+                static_cast<float>(position.s * Constants::Chunk::LENGTH),
+                0.0f,
+                static_cast<float>(position.t * Constants::Chunk::LENGTH)));
 
-    glm::mat4 model = glm::mat4(1.0f);
-    model = glm::translate(
-        model,
-        glm::vec3(static_cast<float>(position.s * Constants::Chunk::LENGTH),
-                  0.0f,
-                  static_cast<float>(position.t * Constants::Chunk::LENGTH)));
-
-    // Terrain pass: scene shader draws both the terrain and the (blue)
-    // water surface, which is folded into the same mesh.
-    shader.use();
-    shader.setUniformMat4("uModel", model);
-    chunk.render();
-  });
+        // Terrain pass: scene shader draws both the terrain and the (blue)
+        // water surface, which is folded into the same mesh.
+        shader.use();
+        shader.setUniformMat4("uModel", model);
+        chunk.render();
+      });
 }
 
 bool ChunkManager::tryGetGroundHeight(const glm::vec3 &cameraPosition,

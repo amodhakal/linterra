@@ -195,6 +195,7 @@ if(BUILD_TESTS)
     tests/test_frustum.cpp
     tests/test_gpu_slot_pool.cpp
     tests/test_heightmap.cpp
+    tests/test_hierarchical_cull.cpp
     tests/test_io.cpp
     tests/test_level_of_detail.cpp
     tests/test_packed_vertex.cpp

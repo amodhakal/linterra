@@ -385,6 +385,46 @@ public:
     return stats;
   }
 
+  /** Visit every resident chunk, consulting a predicate at each cell and
+   *  skipping whole subtrees it rejects.
+   *
+   *  descend(int level, const glm::ivec2 &origin, const Node *node) -> bool
+   *  returns false to drop that cell's subtree without visiting the chunks in
+   *  it. It is called on every cell the walk reaches, so it sees the tree's
+   *  shape and can reject at the coarsest level available.
+   *
+   *  This is the traversal hierarchical culling needs, and it is a different
+   *  method from forEachCellIn on purpose. forEachCellIn is driven by a query
+   *  REGION and reports cells that hold nothing, because the streaming question
+   *  is "which positions have no chunk". This one walks only what is resident,
+   *  because the drawing question is "which of the chunks I already have are
+   *  worth a draw call" -- and a rejected cell must not cause its chunks to be
+   *  spawned.
+   *
+   *  The predicate is called BEFORE descending, so a rejected cell costs one
+   *  call and nothing below it. A predicate that could reject nothing is
+   *  equivalent to forEachValue, and the tests check that equivalence. */
+  template <class P, class F>
+  std::size_t forEachValuePruned(P &&descend, F &&fn) const {
+    m_LastCellsTested = 0;
+    std::size_t visited = 0;
+    for (const uint64_t key : sortedKeys()) {
+      const auto it = m_Top.find(key);
+      if (it != m_Top.end()) {
+        visited += forEachValuePrunedImpl(it->second.get(), descend, fn);
+      }
+    }
+    return visited;
+  }
+
+  /** Cells the last forEachValuePruned asked its predicate about, for
+   *  measurement. Reset by each call.
+   *
+   *  A counter rather than a return value because the saving IS the ratio of
+   *  cells tested to chunks drawn, and a caller that has to thread a counter
+   *  through its predicate to measure it is a counter nobody writes. */
+  [[nodiscard]] std::size_t lastCellsTested() const { return m_LastCellsTested; }
+
   /** Erase every value in the subtrees the visitor selects.
    *
    *  visit(int level, const glm::ivec2 &origin) -> bool returns true to evict
@@ -648,6 +688,28 @@ private:
     return visited;
   }
 
+  template <class P, class F>
+  std::size_t forEachValuePrunedImpl(Node *node, P &descend, F &fn) const {
+    ++m_LastCellsTested;
+    if (!descend(static_cast<int>(node->level), node->origin)) {
+      return 0;
+    }
+    if (node->level == 0) {
+      if (node->hasValue()) {
+        fn(node->origin, *node->value);
+        return 1;
+      }
+      return 0;
+    }
+    std::size_t visited = 0;
+    for (const std::unique_ptr<Node> &child : node->children) {
+      if (child != nullptr) {
+        visited += forEachValuePrunedImpl(child.get(), descend, fn);
+      }
+    }
+    return visited;
+  }
+
   template <class F>
   std::size_t forEachEntryImpl(Node *node, F &fn) {
     if (node->level == 0) {
@@ -782,5 +844,9 @@ private:
   std::vector<Node *> m_EraseQueue;
   std::size_t m_Size = 0;
   std::size_t m_LiveNodes = 0;
+  // Cells offered to the last forEachValuePruned predicate. Mutable because the
+  // predicate is a caller lambda and threading a counter through every call site
+  // to measure the traversal is how measurements end up not existing.
+  mutable std::size_t m_LastCellsTested = 0;
   int m_WalkDepth = 0;
 };

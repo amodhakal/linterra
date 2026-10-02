@@ -36,13 +36,19 @@ bool Frustum::isChunkInside(const glm::ivec2 &position) {
   // Chunk geometry occupies [pos*L, pos*L+L] in X/Z (see ChunkManager::render's
   // model translation and chunk.cpp's local block coordinates). The box must
   // match that exactly; previously it was offset by -L/2 (half a chunk).
-  glm::vec3 chunkCorner1 = {
-      static_cast<float>(position.x * Constants::Chunk::LENGTH),
-      0.0,
-      static_cast<float>(position.y * Constants::Chunk::LENGTH)};
-  glm::vec3 chunkCorner2 = {chunkCorner1.x + Constants::Chunk::LENGTH,
-                            Constants::Chunk::HEIGHT,
-                            chunkCorner1.z + Constants::Chunk::LENGTH};
+  return isBoundsInside(
+      {static_cast<float>(position.x * Constants::Chunk::LENGTH), 0.0f,
+       static_cast<float>(position.y * Constants::Chunk::LENGTH)},
+      {static_cast<float>(position.x * Constants::Chunk::LENGTH) +
+           static_cast<float>(Constants::Chunk::LENGTH),
+       static_cast<float>(Constants::Chunk::HEIGHT),
+       static_cast<float>(position.y * Constants::Chunk::LENGTH) +
+           static_cast<float>(Constants::Chunk::LENGTH)});
+}
+
+bool Frustum::isBoundsInside(const glm::vec3 &boxMin, const glm::vec3 &boxMax) {
+  glm::vec3 chunkCorner1 = boxMin;
+  glm::vec3 chunkCorner2 = boxMax;
 
   glm::vec3 corners[8];
   int i = 0;
